@@ -52,7 +52,7 @@ SmartBasket DWM is a production-grade retail intelligence platform that unifies 
 
 1. **Clone the repository:**
    ```bash
-   git clone https://github.com/shamitachavan38-hue/smart-basket-dwm.git
+   git clone https://github.com/shamita3095-hub/smart-basket-dwm.git
    cd smart-basket-dwm
    ```
 
