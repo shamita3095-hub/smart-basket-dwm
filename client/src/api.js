@@ -28,6 +28,19 @@ export async function fetchCustomer(id) {
   return res.json();
 }
 
+export async function createCustomer(customerData) {
+  const res = await fetch(`${API_BASE}/customers`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(customerData)
+  });
+  if (!res.ok) {
+    const data = await res.json();
+    throw new Error(data.error || 'Failed to register customer');
+  }
+  return res.json();
+}
+
 export async function fetchShoppingList(customerId) {
   const res = await fetch(`${API_BASE}/shopping-list/${customerId}`);
   return res.json();

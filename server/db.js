@@ -7,11 +7,34 @@ if (!fs.existsSync(dataDir)) {
   fs.mkdirSync(dataDir, { recursive: true });
 }
 
-const dbPath = path.join(dataDir, 'smartbasket.db');
+let dbPath = path.join(dataDir, 'smartbasket.db');
+
+// In serverless environments (e.g., Vercel / AWS Lambda), the deployment directory is read-only.
+// Copy the database file to /tmp so SQLite WAL and write operations succeed.
+if (process.env.VERCEL || process.env.AWS_LAMBDA_FUNCTION_NAME) {
+  try {
+    const tmpDataDir = path.join('/tmp', 'smartbasket_data');
+    if (!fs.existsSync(tmpDataDir)) {
+      fs.mkdirSync(tmpDataDir, { recursive: true });
+    }
+    const tmpDbPath = path.join(tmpDataDir, 'smartbasket.db');
+    if (!fs.existsSync(tmpDbPath) && fs.existsSync(dbPath)) {
+      fs.copyFileSync(dbPath, tmpDbPath);
+    }
+    dbPath = tmpDbPath;
+  } catch (err) {
+    console.error('Serverless DB copy error:', err);
+  }
+}
+
 const db = new DatabaseSync(dbPath);
 
 // Enable WAL mode for high performance
-db.exec('PRAGMA journal_mode = WAL;');
+try {
+  db.exec('PRAGMA journal_mode = WAL;');
+} catch {
+  // If WAL is unsupported on ephemeral storage, fall back to default
+}
 db.exec('PRAGMA foreign_keys = ON;');
 
 function initSchema() {

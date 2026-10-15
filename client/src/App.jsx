@@ -5,6 +5,7 @@ import ShoppingList from './components/ShoppingList';
 import BudgetPlanner from './components/BudgetPlanner';
 import CartCheckoutModal from './components/CartCheckoutModal';
 import AnalyticsSuite from './components/AnalyticsSuite';
+import CustomerLoginModal from './components/CustomerLoginModal';
 import {
   fetchCustomers,
   fetchCategories,
@@ -22,9 +23,11 @@ import {
 } from './api';
 
 export default function App() {
+  const [appMode, setAppMode] = useState('customer'); // 'customer' or 'admin'
   const [activeTab, setActiveTab] = useState('catalog'); // 'catalog', 'shopping-list', 'budget', 'analytics'
   const [customers, setCustomers] = useState([]);
   const [activeCustomer, setActiveCustomer] = useState(null);
+  const [isLoginModalOpen, setIsLoginModalOpen] = useState(false);
 
   const [categories, setCategories] = useState([]);
   const [products, setProducts] = useState([]);
@@ -51,10 +54,18 @@ export default function App() {
           fetchStores()
         ]);
 
-        setCustomers(custRes || []);
-        if (custRes && custRes.length > 0) {
-          setActiveCustomer(custRes[0]);
+        const custList = custRes || [];
+        setCustomers(custList);
+
+        // Check if there's a stored customer ID in localStorage
+        const savedCustId = localStorage.getItem('smartbasket_customer_id');
+        if (savedCustId) {
+          const match = custList.find(c => c.customer_id === savedCustId);
+          setActiveCustomer(match || custList[0] || null);
+        } else if (custList.length > 0) {
+          setActiveCustomer(custList[0]);
         }
+
         setCategories(catRes || []);
         setStores(storeRes || []);
       } catch (err) {
@@ -92,6 +103,13 @@ export default function App() {
       setOrderHistory(ordersRes || []);
     } catch (err) {
       console.error('Error loading customer data:', err);
+    }
+  };
+
+  const handleSelectCustomer = (customer) => {
+    setActiveCustomer(customer);
+    if (customer?.customer_id) {
+      localStorage.setItem('smartbasket_customer_id', customer.customer_id);
     }
   };
 
@@ -138,7 +156,10 @@ export default function App() {
 
   // Shopping List Handlers
   const handleAddToList = async (product) => {
-    if (!activeCustomer) return;
+    if (!activeCustomer) {
+      setIsLoginModalOpen(true);
+      return;
+    }
     await addShoppingListItem(activeCustomer.customer_id, product.product_id, 1);
     await loadCustomerData(activeCustomer.customer_id);
   };
@@ -219,9 +240,12 @@ export default function App() {
       <Navbar
         activeTab={activeTab}
         setActiveTab={setActiveTab}
+        appMode={appMode}
+        setAppMode={setAppMode}
         customers={customers}
         activeCustomer={activeCustomer}
-        setActiveCustomer={setActiveCustomer}
+        setActiveCustomer={handleSelectCustomer}
+        onOpenLoginModal={() => setIsLoginModalOpen(true)}
         cartItemCount={cartItemCount}
         setIsCartOpen={setIsCartOpen}
         shoppingListItemCount={shoppingList.items?.length || 0}
@@ -232,7 +256,7 @@ export default function App() {
         {loading ? (
           <div className="text-center py-24 space-y-3">
             <div className="w-10 h-10 border-4 border-emerald-600 border-t-transparent rounded-full animate-spin mx-auto"></div>
-            <p className="text-sm font-semibold text-slate-600">Loading SmartBasket DWM Environment...</p>
+            <p className="text-sm font-semibold text-slate-600">Loading SmartBasket Store...</p>
           </div>
         ) : (
           <>
@@ -247,6 +271,12 @@ export default function App() {
                 onAddToCart={handleAddToCart}
                 onAddToList={handleAddToList}
                 shoppingListProductIds={shoppingListProductIds}
+                activeCustomer={activeCustomer}
+                budgetStatus={budgetStatus}
+                onOpenLoginModal={() => setIsLoginModalOpen(true)}
+                onNavigateToBudget={() => setActiveTab('budget')}
+                onOpenCart={() => setIsCartOpen(true)}
+                cartItemCount={cartItemCount}
               />
             )}
 
@@ -292,16 +322,31 @@ export default function App() {
         activeCustomer={activeCustomer}
         onCheckoutComplete={handleCheckoutComplete}
         budgetStatus={budgetStatus}
+        appMode={appMode}
+      />
+
+      {/* Customer Login / Switcher Modal */}
+      <CustomerLoginModal
+        isOpen={isLoginModalOpen}
+        onClose={() => setIsLoginModalOpen(false)}
+        customers={customers}
+        activeCustomer={activeCustomer}
+        onSelectCustomer={handleSelectCustomer}
+        onCustomerCreated={(newCust) => {
+          setCustomers(prev => [newCust, ...prev]);
+        }}
       />
 
       {/* Footer */}
       <footer className="bg-white border-t border-slate-200 py-6 text-center text-xs text-slate-500">
         <div className="max-w-7xl mx-auto px-4 space-y-1">
-          <p className="font-semibold text-slate-700">
-            SmartBasket — Intelligent Shopping List & Budget Planner (Full-Stack DWM Project)
+          <p className="font-bold text-slate-700">
+            SmartBasket — Intelligent Retail & Budget Management System
           </p>
           <p>
-            Relational Operational Layer (OLTP: 10 Normalized Tables) • Automated Staging ETL Pipeline • OLAP Fact Constellation Schema • Apriori Market Basket Association Mining
+            {appMode === 'customer'
+              ? 'Personalized Shopping Lists • Real-time Budget Variance Alerts • Instant Checkout with Multiple Payment Methods'
+              : 'Relational OLTP (10 Tables) • Automated Staging ETL Pipeline • Star / Constellation OLAP • Apriori Association Mining'}
           </p>
         </div>
       </footer>

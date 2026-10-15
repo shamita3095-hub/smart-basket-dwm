@@ -1,6 +1,7 @@
 const express = require('express');
 const cors = require('cors');
 const path = require('node:path');
+const fs = require('node:fs');
 const { db, initSchema } = require('./db');
 const { runETL, parseDateString } = require('./etl');
 const {
@@ -122,6 +123,66 @@ app.get('/api/customers/:id', (req, res) => {
       ...customer,
       monthlyBudget: budget ? budget.monthly_budget : 10000
     });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Register / Create a new customer account
+app.post('/api/customers', (req, res) => {
+  try {
+    const { customerName, email, city, monthlyBudget = 10000 } = req.body;
+    if (!customerName || !customerName.trim()) {
+      return res.status(400).json({ error: 'Customer name is required' });
+    }
+
+    const cleanName = customerName.trim();
+    const cleanCity = (city && city.trim()) || 'Mumbai';
+    const cleanEmail = (email && email.trim()) || `${cleanName.toLowerCase().replace(/\\s+/g, '.')}@example.com`;
+    const numBudget = Number(monthlyBudget) > 0 ? Number(monthlyBudget) : 10000;
+
+    const customerId = `CUST_${Date.now()}`;
+    const currentMonthYear = new Date().toISOString().substring(0, 7);
+
+    // 1. Insert into OLTP customers table
+    db.prepare(`
+      INSERT INTO customers (customer_id, customer_name, email, city)
+      VALUES (?, ?, ?, ?)
+    `).run(customerId, cleanName, cleanEmail, cleanCity);
+
+    // 2. Set initial budget
+    db.prepare(`
+      INSERT OR REPLACE INTO budgets (customer_id, monthly_budget, month_year)
+      VALUES (?, ?, ?)
+    `).run(customerId, numBudget, currentMonthYear);
+
+    // 3. Insert into Conformed Dimension Dim_Customer
+    try {
+      db.prepare(`
+        INSERT OR IGNORE INTO dim_customer (customer_id, customer_name, city, segment)
+        VALUES (?, ?, ?, 'New Shopper')
+      `).run(customerId, cleanName, cleanCity);
+    } catch {
+      // Optional sync
+    }
+
+    // 4. Initialize default empty shopping list
+    const listId = `LIST_${customerId}`;
+    db.prepare(`
+      INSERT OR IGNORE INTO shopping_lists (shopping_list_id, customer_id, list_name)
+      VALUES (?, ?, 'My Smart Shopping List')
+    `).run(listId, customerId);
+
+    const newCustomer = {
+      customer_id: customerId,
+      customer_name: cleanName,
+      email: cleanEmail,
+      city: cleanCity,
+      monthly_budget: numBudget,
+      segment: 'New Shopper'
+    };
+
+    res.status(201).json(newCustomer);
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
@@ -658,14 +719,21 @@ app.get('/api/schema/constellation', (req, res) => {
   }
 });
 
-// Serve frontend build in production
+// Serve frontend build in production if available
 const clientDist = path.join(__dirname, '..', 'client', 'dist');
-app.use(express.static(clientDist));
-app.get('*', (req, res, next) => {
-  if (req.path.startsWith('/api')) return next();
-  res.sendFile(path.join(clientDist, 'index.html'));
-});
+if (fs.existsSync(clientDist)) {
+  app.use(express.static(clientDist));
+  app.get('*', (req, res, next) => {
+    if (req.path.startsWith('/api')) return next();
+    res.sendFile(path.join(clientDist, 'index.html'));
+  });
+}
 
-app.listen(PORT, () => {
-  console.log(`SmartBasket DWM Server running at http://localhost:${PORT}`);
-});
+// In direct standalone execution, listen on PORT. In serverless / module imports, export app.
+if (require.main === module) {
+  app.listen(PORT, () => {
+    console.log(`SmartBasket DWM Server running at http://localhost:${PORT}`);
+  });
+}
+
+module.exports = app;
