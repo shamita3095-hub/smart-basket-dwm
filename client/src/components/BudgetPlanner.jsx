@@ -372,22 +372,33 @@ export default function BudgetPlanner({
           <p className="text-xs text-slate-400 text-center py-6">No recent orders recorded for this customer.</p>
         ) : (
           <div className="divide-y divide-slate-100 border border-slate-100 rounded-xl overflow-hidden">
-            {orderHistory.slice(0, 5).map((ord) => (
-              <div key={ord.order_id} className="p-3.5 flex items-center justify-between text-xs hover:bg-slate-50">
-                <div>
-                  <div className="font-bold text-slate-800">{ord.order_id}</div>
-                  <div className="text-slate-500 text-[11px] mt-0.5">
-                    {ord.visit_date} • {ord.store_type} ({ord.city}) • Paid via {ord.payment_method || 'UPI'}
+            {orderHistory.slice(0, 10).map((ord) => {
+              const isThisMonth = ord.visit_date?.startsWith(selectedMonthYear) || 
+                (ord.visit_date?.includes('-') && (ord.visit_date.endsWith(`-${selectedMonthYear.split('-')[1]}-${selectedMonthYear.split('-')[0]}`) || ord.visit_date.startsWith(selectedMonthYear)));
+              return (
+                <div key={ord.order_id} className={`p-3.5 flex items-center justify-between text-xs hover:bg-slate-50 ${isThisMonth ? 'bg-emerald-50/20' : ''}`}>
+                  <div>
+                    <div className="font-bold text-slate-800 flex items-center gap-2">
+                      <span>{ord.order_id}</span>
+                      {isThisMonth && (
+                        <span className="text-[10px] font-bold text-emerald-700 bg-emerald-100 px-1.5 py-0.2 rounded">
+                          Deducted from {formatMonthLabel(selectedMonthYear)}
+                        </span>
+                      )}
+                    </div>
+                    <div className="text-slate-500 text-[11px] mt-0.5">
+                      {ord.visit_date} • {ord.store_type || 'Retail Outlet'} ({ord.city || activeCustomer?.city || 'City'}) • Paid via {ord.payment_method || 'UPI'}
+                    </div>
+                  </div>
+                  <div className="text-right">
+                    <div className="font-black text-slate-900 text-sm">₹{Number(ord.total_amount).toFixed(2)}</div>
+                    <span className="text-[10px] bg-emerald-100 text-emerald-800 font-bold px-1.5 py-0.2 rounded">
+                      {ord.status || 'COMPLETED'}
+                    </span>
                   </div>
                 </div>
-                <div className="text-right">
-                  <div className="font-black text-slate-900 text-sm">₹{Number(ord.total_amount).toFixed(2)}</div>
-                  <span className="text-[10px] bg-emerald-100 text-emerald-800 font-bold px-1.5 py-0.2 rounded">
-                    {ord.status || 'COMPLETED'}
-                  </span>
-                </div>
-              </div>
-            ))}
+              );
+            })}
           </div>
         )}
       </div>

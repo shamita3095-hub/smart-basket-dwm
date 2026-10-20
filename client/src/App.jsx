@@ -92,11 +92,12 @@ export default function App() {
     }
   }, [activeCustomer]);
 
-  const loadCustomerData = async (customerId) => {
+  const loadCustomerData = async (customerId, targetMonthYear) => {
     try {
+      const currentMonth = targetMonthYear || new Date().toISOString().substring(0, 7);
       const [listRes, budgetRes, ordersRes] = await Promise.all([
         fetchShoppingList(customerId),
-        fetchBudget(customerId),
+        fetchBudget(customerId, currentMonth),
         fetchCustomerOrders(customerId)
       ]);
       setShoppingList(listRes || { list: null, items: [], totalEstimatedCost: 0 });
@@ -237,8 +238,15 @@ export default function App() {
   // Checkout Handler
   const handleCheckoutComplete = async (orderPayload) => {
     const res = await checkoutOrder(orderPayload);
-    if (activeCustomer) {
-      await loadCustomerData(activeCustomer.customer_id);
+    const targetCustId = orderPayload.customerId || activeCustomer?.customer_id;
+    if (targetCustId) {
+      await loadCustomerData(targetCustId);
+      if (!activeCustomer || activeCustomer.customer_id !== targetCustId) {
+        const found = customers.find(c => c.customer_id === targetCustId);
+        if (found) {
+          handleSelectCustomer(found);
+        }
+      }
     }
     return res;
   };
@@ -336,6 +344,10 @@ export default function App() {
         appMode={appMode}
         onRegisterCustomer={handleCustomerCreated}
         onOpenLoginModal={handleOpenLoginModal}
+        onNavigateToBudget={() => {
+          setIsCartOpen(false);
+          setActiveTab('budget');
+        }}
       />
 
       {/* Customer Login / Switcher Modal */}

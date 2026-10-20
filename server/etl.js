@@ -199,7 +199,7 @@ function runETL(options = { incremental: false }) {
     }
 
     const insertFactSaleStmt = db.prepare(`
-      INSERT INTO fact_sales (
+      INSERT OR IGNORE INTO fact_sales (
         order_id, order_item_id, date_id, customer_id, product_id, category_id, store_id, quantity, unit_price, total_amount
       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `);
@@ -225,7 +225,8 @@ function runETL(options = { incremental: false }) {
     const items = orderItemsStmt.all();
     for (const item of items) {
       const dInfo = dateMap.get(item.visit_date) || parseDateString(item.visit_date);
-      const lineTotal = item.quantity * item.unit_price;
+      const unitPrice = Number(item.unit_price !== undefined ? item.unit_price : item.unitPrice) || 0;
+      const lineTotal = Number(item.quantity) * unitPrice;
 
       insertFactSaleStmt.run(
         item.order_id,
@@ -236,7 +237,7 @@ function runETL(options = { incremental: false }) {
         item.category_id,
         item.store_id,
         item.quantity,
-        item.unit_price,
+        unitPrice,
         lineTotal
       );
       salesLoadedCount++;
@@ -263,6 +264,10 @@ function runETL(options = { incremental: false }) {
         SELECT customer_id, month_year FROM CustomerSpending
         UNION
         SELECT customer_id, month_year FROM budgets
+        UNION
+        SELECT customer_id, SUBSTR(visit_date, 1, 7) AS month_year FROM orders WHERE visit_date LIKE '____-__-__'
+        UNION
+        SELECT customer_id, SUBSTR(visit_date, 7, 4) || '-' || SUBSTR(visit_date, 4, 2) AS month_year FROM orders WHERE visit_date LIKE '__-__-____'
       )
       SELECT 
         acm.customer_id,
@@ -277,6 +282,7 @@ function runETL(options = { incremental: false }) {
       FROM AllCustomerMonths acm
       LEFT JOIN CustomerSpending cs ON acm.customer_id = cs.customer_id AND acm.month_year = cs.month_year
       LEFT JOIN budgets b ON acm.customer_id = b.customer_id AND acm.month_year = b.month_year
+      WHERE acm.customer_id IS NOT NULL AND acm.month_year IS NOT NULL AND acm.month_year != ''
     `);
 
     const budgetActuals = budgetFactsStmt.all();
@@ -284,7 +290,7 @@ function runETL(options = { incremental: false }) {
     // Clear and reload Fact_Budget_Performance
     db.exec('DELETE FROM fact_budget_performance;');
     const insertBudgetFactStmt = db.prepare(`
-      INSERT INTO fact_budget_performance (
+      INSERT OR REPLACE INTO fact_budget_performance (
         customer_id, date_id, month_year, monthly_budget, actual_spent, variance_amount, utilization_rate, status
       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
     `);

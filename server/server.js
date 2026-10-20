@@ -332,10 +332,11 @@ app.post('/api/shopping-list/clear', (req, res) => {
 app.get('/api/budget/:customerId', (req, res) => {
   try {
     const { customerId } = req.params;
+    const currentMonthYear = new Date().toISOString().substring(0, 7);
     let monthYear = req.query.monthYear;
 
     // Get available months with records for this customer
-    const availableMonths = db.prepare(`
+    const rawMonths = db.prepare(`
       SELECT DISTINCT month_year FROM (
         SELECT month_year FROM budgets WHERE customer_id = ?
         UNION
@@ -351,39 +352,86 @@ app.get('/api/budget/:customerId', (req, res) => {
       ORDER BY month_year DESC
     `).all(customerId, customerId, customerId, customerId).map(r => r.month_year);
 
-    if (!monthYear) {
-      if (availableMonths.length > 0) {
-        monthYear = availableMonths[0];
-      } else {
-        monthYear = new Date().toISOString().substring(0, 7);
-      }
+    const availableMonths = [...rawMonths];
+    if (!availableMonths.includes(currentMonthYear)) {
+      availableMonths.unshift(currentMonthYear);
+      availableMonths.sort((a, b) => b.localeCompare(a));
     }
 
-    // Get configured budget
-    const budgetRow = db.prepare(`
-      SELECT monthly_budget FROM budgets WHERE customer_id = ? AND month_year = ?
-    `).get(customerId, monthYear) || db.prepare(`
-      SELECT monthly_budget FROM budgets WHERE customer_id = ? ORDER BY month_year DESC LIMIT 1
-    `).get(customerId);
+    if (!monthYear) {
+      monthYear = currentMonthYear;
+    }
 
-    const monthlyBudget = budgetRow ? budgetRow.monthly_budget : 10000;
+    // Get or initialize configured budget for this customer and month
+    let budgetRow = db.prepare(`
+      SELECT monthly_budget FROM budgets WHERE customer_id = ? AND month_year = ?
+    `).get(customerId, monthYear);
+
+    if (!budgetRow) {
+      const prevBudget = db.prepare(`
+        SELECT monthly_budget FROM budgets WHERE customer_id = ? ORDER BY month_year DESC LIMIT 1
+      `).get(customerId);
+      const defaultBudget = prevBudget ? prevBudget.monthly_budget : 10000;
+      db.prepare(`
+        INSERT OR REPLACE INTO budgets (customer_id, monthly_budget, month_year)
+        VALUES (?, ?, ?)
+      `).run(customerId, defaultBudget, monthYear);
+      budgetRow = { monthly_budget: defaultBudget };
+    }
+
+    const monthlyBudget = Number(budgetRow.monthly_budget);
 
     // Get current spent in this month from orders (handles both DD-MM-YYYY and YYYY-MM-DD formats)
     const [yr, mo] = monthYear.split('-');
     const spendingRow = db.prepare(`
       SELECT IFNULL(SUM(total_amount), 0) AS current_spent
       FROM orders
-      WHERE customer_id = ? AND (
-        visit_date LIKE (? || '%')
-        OR visit_date LIKE ('%-' || ? || '-' || ?)
-      )
+      WHERE customer_id = ? 
+        AND (status = 'COMPLETED' OR status IS NULL)
+        AND (
+          visit_date LIKE (? || '%')
+          OR visit_date LIKE ('%-' || ? || '-' || ?)
+        )
     `).get(customerId, monthYear, mo, yr);
 
-    const currentSpent = spendingRow ? spendingRow.current_spent : 0;
+    const currentSpent = spendingRow ? Number(spendingRow.current_spent) : 0;
     const remainingBalance = monthlyBudget - currentSpent;
     const percentageUsed = monthlyBudget > 0 ? (currentSpent / monthlyBudget) * 100 : 0;
     const isExceeded = percentageUsed > 100;
     const isNearLimit = percentageUsed >= 80 && percentageUsed <= 100;
+
+    let status = 'UNDER_BUDGET';
+    if (isExceeded) status = 'OVER_BUDGET';
+    else if (isNearLimit) status = 'NEAR_LIMIT';
+
+    // Synchronize current month in dim_date and fact_budget_performance so the warehouse table immediately reflects this
+    try {
+      const dInfo = parseDateString(`${monthYear}-01`);
+      db.prepare(`
+        INSERT OR IGNORE INTO dim_date (date_id, full_date, day, month, month_name, quarter, year, day_of_week)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+      `).run(dInfo.dateId, dInfo.fullDate, dInfo.day, dInfo.month, dInfo.monthName, dInfo.quarter, dInfo.year, dInfo.dayOfWeek);
+
+      const existingFact = db.prepare(`
+        SELECT budget_fact_id FROM fact_budget_performance WHERE customer_id = ? AND month_year = ?
+      `).get(customerId, monthYear);
+
+      if (existingFact) {
+        db.prepare(`
+          UPDATE fact_budget_performance
+          SET monthly_budget = ?, actual_spent = ?, variance_amount = ?, utilization_rate = ?, status = ?
+          WHERE budget_fact_id = ?
+        `).run(monthlyBudget, currentSpent, currentSpent - monthlyBudget, parseFloat(percentageUsed.toFixed(1)), status, existingFact.budget_fact_id);
+      } else {
+        db.prepare(`
+          INSERT INTO fact_budget_performance (
+            customer_id, date_id, month_year, monthly_budget, actual_spent, variance_amount, utilization_rate, status
+          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        `).run(customerId, dInfo.dateId, monthYear, monthlyBudget, currentSpent, currentSpent - monthlyBudget, parseFloat(percentageUsed.toFixed(1)), status);
+      }
+    } catch (syncErr) {
+      console.warn('Fact sync notice in GET /api/budget:', syncErr.message);
+    }
 
     // Historical spending comparison
     const history = db.prepare(`
@@ -396,7 +444,7 @@ app.get('/api/budget/:customerId', (req, res) => {
           END AS my,
           SUM(total_amount) AS total_amount
         FROM orders
-        WHERE customer_id = ?
+        WHERE customer_id = ? AND (status = 'COMPLETED' OR status IS NULL)
         GROUP BY my
       )
     `).get(customerId);
@@ -419,11 +467,6 @@ app.get('/api/budget/:customerId', (req, res) => {
 
     // If analytical fact record does not exist yet (e.g. fresh registration), provide synthesized active fact
     if (performanceHistory.length === 0) {
-      const rate = monthlyBudget > 0 ? (currentSpent / monthlyBudget) * 100 : 0;
-      let status = 'UNDER_BUDGET';
-      if (rate > 100) status = 'OVER_BUDGET';
-      else if (rate >= 80) status = 'NEAR_LIMIT';
-
       performanceHistory = [{
         budget_fact_id: 1,
         customer_id: customerId,
@@ -432,7 +475,7 @@ app.get('/api/budget/:customerId', (req, res) => {
         monthly_budget: monthlyBudget,
         actual_spent: currentSpent,
         variance_amount: currentSpent - monthlyBudget,
-        utilization_rate: parseFloat(rate.toFixed(1)),
+        utilization_rate: parseFloat(percentageUsed.toFixed(1)),
         status: status
       }];
     }
@@ -526,6 +569,7 @@ app.post('/api/orders/checkout', (req, res) => {
 
     const orderId = `ORD_${Date.now()}`;
     const today = new Date().toISOString().substring(0, 10); // YYYY-MM-DD
+    const currentMonthYear = today.substring(0, 7);
     const totalAmount = items.reduce((acc, item) => acc + (item.quantity * item.unitPrice), 0);
 
     db.exec('BEGIN TRANSACTION;');
@@ -555,9 +599,80 @@ app.post('/api/orders/checkout', (req, res) => {
       VALUES (?, ?, ?, 'SUCCESS', ?)
     `).run(paymentId, orderId, paymentMethod, today);
 
+    // 4. Ensure customer has an active monthly budget record for this month
+    let budgetRow = db.prepare(`
+      SELECT monthly_budget FROM budgets WHERE customer_id = ? AND month_year = ?
+    `).get(customerId, currentMonthYear);
+
+    if (!budgetRow) {
+      const prevBudget = db.prepare(`
+        SELECT monthly_budget FROM budgets WHERE customer_id = ? ORDER BY month_year DESC LIMIT 1
+      `).get(customerId);
+      const defaultBudget = prevBudget ? prevBudget.monthly_budget : 10000;
+      db.prepare(`
+        INSERT OR REPLACE INTO budgets (customer_id, monthly_budget, month_year)
+        VALUES (?, ?, ?)
+      `).run(customerId, defaultBudget, currentMonthYear);
+      budgetRow = { monthly_budget: defaultBudget };
+    }
+
+    const monthlyBudget = Number(budgetRow.monthly_budget);
+
+    // 5. Calculate cumulative completed monthly spending including this order
+    const [yr, mo] = currentMonthYear.split('-');
+    const spendingRow = db.prepare(`
+      SELECT IFNULL(SUM(total_amount), 0) AS current_spent
+      FROM orders
+      WHERE customer_id = ? 
+        AND (status = 'COMPLETED' OR status IS NULL)
+        AND (
+          visit_date LIKE (? || '%')
+          OR visit_date LIKE ('%-' || ? || '-' || ?)
+        )
+    `).get(customerId, currentMonthYear, mo, yr);
+
+    const currentSpent = spendingRow ? Number(spendingRow.current_spent) : totalAmount;
+    const remainingBalance = monthlyBudget - currentSpent;
+    const percentageUsed = monthlyBudget > 0 ? (currentSpent / monthlyBudget) * 100 : 0;
+    const isExceeded = percentageUsed > 100;
+    const isNearLimit = percentageUsed >= 80 && percentageUsed <= 100;
+
+    let status = 'UNDER_BUDGET';
+    if (isExceeded) status = 'OVER_BUDGET';
+    else if (isNearLimit) status = 'NEAR_LIMIT';
+
+    // 6. Immediately update / upsert Data Warehouse Fact_Budget_Performance for this shopper & month
+    try {
+      const dInfo = parseDateString(today);
+      db.prepare(`
+        INSERT OR IGNORE INTO dim_date (date_id, full_date, day, month, month_name, quarter, year, day_of_week)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+      `).run(dInfo.dateId, dInfo.fullDate, dInfo.day, dInfo.month, dInfo.monthName, dInfo.quarter, dInfo.year, dInfo.dayOfWeek);
+
+      const existingFact = db.prepare(`
+        SELECT budget_fact_id FROM fact_budget_performance WHERE customer_id = ? AND month_year = ?
+      `).get(customerId, currentMonthYear);
+
+      if (existingFact) {
+        db.prepare(`
+          UPDATE fact_budget_performance
+          SET date_id = ?, monthly_budget = ?, actual_spent = ?, variance_amount = ?, utilization_rate = ?, status = ?
+          WHERE budget_fact_id = ?
+        `).run(dInfo.dateId, monthlyBudget, currentSpent, currentSpent - monthlyBudget, parseFloat(percentageUsed.toFixed(1)), status, existingFact.budget_fact_id);
+      } else {
+        db.prepare(`
+          INSERT INTO fact_budget_performance (
+            customer_id, date_id, month_year, monthly_budget, actual_spent, variance_amount, utilization_rate, status
+          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        `).run(customerId, dInfo.dateId, currentMonthYear, monthlyBudget, currentSpent, currentSpent - monthlyBudget, parseFloat(percentageUsed.toFixed(1)), status);
+      }
+    } catch (whErr) {
+      console.warn('Real-time fact upsert warning:', whErr.message);
+    }
+
     db.exec('COMMIT;');
 
-    // 4. Optionally trigger ETL Pipeline immediately
+    // 7. Trigger incremental ETL Pipeline
     let etlSummary = null;
     if (triggerETL) {
       etlSummary = runETL({ incremental: true });
@@ -568,6 +683,13 @@ app.post('/api/orders/checkout', (req, res) => {
       orderId,
       totalAmount,
       itemCount: items.length,
+      monthlyBudget,
+      currentSpent,
+      remainingBalance,
+      percentageUsed: parseFloat(percentageUsed.toFixed(1)),
+      monthYear: currentMonthYear,
+      isExceeded,
+      isNearLimit,
       etlSynced: !!etlSummary && etlSummary.success,
       etlSummary
     });

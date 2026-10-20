@@ -35,7 +35,8 @@ export default function CartCheckoutModal({
   budgetStatus,
   appMode = 'customer',
   onRegisterCustomer,
-  onOpenLoginModal
+  onOpenLoginModal,
+  onNavigateToBudget
 }) {
   const [selectedStore, setSelectedStore] = useState('');
   const [paymentMethod, setPaymentMethod] = useState('UPI');
@@ -201,9 +202,36 @@ export default function CartCheckoutModal({
                   <span className="text-slate-500">Outlet:</span>
                   <span className="font-medium">{orderSuccess.storeName}</span>
                 </div>
-                <div className="border-t border-slate-200 pt-2 flex justify-between text-emerald-800 font-semibold">
-                  <span>Budget Tracker:</span>
-                  <span>Updated in real-time</span>
+                
+                {/* Real-Time Budget Deduction Notice */}
+                <div className="border-t border-slate-200 pt-2.5 space-y-1.5 bg-emerald-50/60 p-2.5 rounded-xl border border-emerald-100">
+                  <div className="flex items-center justify-between font-bold text-emerald-950">
+                    <span className="flex items-center gap-1.5">
+                      <Wallet className="w-3.5 h-3.5 text-emerald-700" />
+                      <span>Monthly Budget Update:</span>
+                    </span>
+                    <span className="text-emerald-700">
+                      ₹{Number(orderSuccess.monthlyBudget || monthlyBudget).toLocaleString('en-IN')}
+                    </span>
+                  </div>
+                  <div className="flex justify-between text-[11px] text-slate-600">
+                    <span>Total Spent this Month:</span>
+                    <span className="font-bold text-slate-900">
+                      ₹{Number(orderSuccess.currentSpent !== undefined ? orderSuccess.currentSpent : (currentSpent + orderSuccess.totalAmount)).toLocaleString('en-IN')}
+                    </span>
+                  </div>
+                  <div className="flex justify-between text-[11px]">
+                    <span className="text-emerald-800 font-semibold">Remaining Balance:</span>
+                    <span className="font-black text-emerald-800">
+                      ₹{Number(orderSuccess.remainingBalance !== undefined ? orderSuccess.remainingBalance : (monthlyBudget - (currentSpent + orderSuccess.totalAmount))).toLocaleString('en-IN')}
+                    </span>
+                  </div>
+                  <div className="flex justify-between text-[11px] text-slate-500">
+                    <span>Budget Used:</span>
+                    <span className="font-extrabold text-indigo-700">
+                      {(orderSuccess.percentageUsed !== undefined ? orderSuccess.percentageUsed : (((currentSpent + orderSuccess.totalAmount) / monthlyBudget) * 100)).toFixed(1)}%
+                    </span>
+                  </div>
                 </div>
               </div>
 
@@ -220,15 +248,26 @@ export default function CartCheckoutModal({
                 </div>
               )}
 
-              <div className="pt-2">
+              <div className="flex flex-col sm:flex-row items-center justify-center gap-3 pt-2">
+                <button
+                  onClick={() => {
+                    setOrderSuccess(null);
+                    onClose();
+                    if (onNavigateToBudget) onNavigateToBudget();
+                  }}
+                  className="w-full sm:w-auto px-6 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white font-bold rounded-xl text-xs transition-all shadow-md flex items-center justify-center gap-2"
+                >
+                  <Wallet className="w-4 h-4" />
+                  <span>View in Budget Planner</span>
+                </button>
                 <button
                   onClick={() => {
                     setOrderSuccess(null);
                     onClose();
                   }}
-                  className="px-6 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white font-bold rounded-xl text-xs transition-all shadow-md"
+                  className="w-full sm:w-auto px-6 py-2.5 bg-slate-100 hover:bg-slate-200 text-slate-800 font-bold rounded-xl text-xs transition-all flex items-center justify-center gap-2"
                 >
-                  Continue Shopping
+                  <span>Continue Shopping</span>
                 </button>
               </div>
             </div>

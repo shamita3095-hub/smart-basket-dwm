@@ -240,6 +240,8 @@ function initSchema() {
     CREATE INDEX IF NOT EXISTS idx_fact_sales_product ON fact_sales(product_id);
     CREATE INDEX IF NOT EXISTS idx_order_items_product ON order_items(product_id);
     CREATE INDEX IF NOT EXISTS idx_order_items_order ON order_items(order_id);
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_fact_sales_order_item ON fact_sales(order_item_id);
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_fact_budget_cust_month ON fact_budget_performance(customer_id, month_year);
   `);
 }
 
