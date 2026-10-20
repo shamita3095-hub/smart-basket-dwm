@@ -104,9 +104,14 @@ export default function BudgetPlanner({
                 <Wallet className="w-5 h-5" />
               </div>
               <h2 className="text-xl font-bold text-slate-900">Personal Grocery Budget Planner</h2>
+              {activeCustomer?.segment === 'New Shopper' && (
+                <span className="text-[10px] font-black px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-800 border border-emerald-300">
+                  New Shopper
+                </span>
+              )}
             </div>
             <p className="text-xs text-slate-500 mt-1">
-              Active profile: <span className="font-semibold text-slate-700">{activeCustomer?.customer_name}</span> ({activeCustomer?.city}) — Stored in OLTP <code className="text-emerald-700 bg-emerald-50 px-1 py-0.5 rounded text-[11px]">Budgets</code>
+              Active profile: <span className="font-semibold text-slate-700">{activeCustomer?.customer_name}</span> ({activeCustomer?.city}) — Stored in OLTP <code className="text-emerald-700 bg-emerald-50 px-1 py-0.5 rounded text-[11px]">Budgets</code> & synced to Data Warehouse <code className="text-indigo-700 bg-indigo-50 px-1 py-0.5 rounded text-[11px]">Fact_Budget_Performance</code>
             </p>
           </div>
 

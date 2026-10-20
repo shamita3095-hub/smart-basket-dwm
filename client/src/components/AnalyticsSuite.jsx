@@ -291,13 +291,18 @@ export default function AnalyticsSuite({ activeCustomer }) {
 
             <div className="bg-white p-5 rounded-2xl border border-slate-200 shadow-xs">
               <span className="text-[11px] font-bold text-slate-500 uppercase tracking-wider block">
-                Active Customers
+                Warehouse Shoppers
               </span>
-              <div className="text-2xl font-black text-slate-900 mt-1">
-                {Number(kpis.activeCustomers).toLocaleString()}
+              <div className="text-2xl font-black text-slate-900 mt-1 flex items-baseline gap-2">
+                <span>{Number(kpis.registeredCustomers || kpis.activeCustomers).toLocaleString()}</span>
+                {kpis.newShoppers > 0 && (
+                  <span className="text-xs font-bold text-amber-800 bg-amber-100 border border-amber-300 px-2 py-0.5 rounded-full">
+                    {kpis.newShoppers} New
+                  </span>
+                )}
               </div>
               <span className="text-xs text-indigo-600 font-semibold mt-1 block">
-                Tracked in Dim_Customer
+                {kpis.activeCustomers} Purchasing in Fact_Sales
               </span>
             </div>
 
@@ -378,6 +383,63 @@ export default function AnalyticsSuite({ activeCustomer }) {
               </div>
             </div>
           </div>
+
+          {/* Live Data Warehouse Shopper Dimension & Budget Registry */}
+          {kpis.recentCustomers && kpis.recentCustomers.length > 0 && (
+            <div className="bg-white p-6 rounded-2xl border border-slate-200 shadow-xs space-y-4">
+              <div className="flex items-center justify-between">
+                <div>
+                  <h3 className="font-bold text-slate-900 text-sm flex items-center gap-2">
+                    <Users className="w-4 h-4 text-emerald-600" />
+                    <span>Conformed Dimension: Recent Shoppers & New User Data (Dim_Customer & Budgets)</span>
+                  </h3>
+                  <p className="text-xs text-slate-500 mt-0.5">
+                    Newly registered shoppers, customer RFM segmentation tags, and allocated monthly spending limits.
+                  </p>
+                </div>
+                <span className="text-[11px] bg-emerald-100 text-emerald-800 font-extrabold px-2.5 py-1 rounded-full border border-emerald-300">
+                  Live Database Sync
+                </span>
+              </div>
+
+              <div className="overflow-x-auto border border-slate-200 rounded-xl">
+                <table className="w-full text-left text-xs">
+                  <thead className="bg-slate-50 text-slate-700 font-bold uppercase tracking-wider border-b border-slate-200">
+                    <tr>
+                      <th className="py-2.5 px-3">Customer ID</th>
+                      <th className="py-2.5 px-3">Customer Name</th>
+                      <th className="py-2.5 px-3">City</th>
+                      <th className="py-2.5 px-3">Warehouse RFM Segment</th>
+                      <th className="py-2.5 px-3 text-right">Allocated Monthly Budget</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-100">
+                    {kpis.recentCustomers.map((cust) => (
+                      <tr key={cust.customer_id} className="hover:bg-slate-50">
+                        <td className="py-2.5 px-3 font-mono font-bold text-slate-700">{cust.customer_id}</td>
+                        <td className="py-2.5 px-3 font-bold text-slate-900">{cust.customer_name}</td>
+                        <td className="py-2.5 px-3 text-slate-600">{cust.city}</td>
+                        <td className="py-2.5 px-3">
+                          <span className={`text-[10px] font-black px-2 py-0.5 rounded-full uppercase ${
+                            cust.segment === 'New Shopper'
+                              ? 'bg-amber-100 text-amber-800 border border-amber-300'
+                              : cust.segment === 'Premium'
+                              ? 'bg-purple-100 text-purple-800 border border-purple-200'
+                              : 'bg-emerald-100 text-emerald-800 border border-emerald-200'
+                          }`}>
+                            {cust.segment || 'New Shopper'}
+                          </span>
+                        </td>
+                        <td className="py-2.5 px-3 text-right font-black text-emerald-800">
+                          ₹{Number(cust.monthly_budget || 10000).toLocaleString('en-IN')}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          )}
         </div>
       )}
 
@@ -732,6 +794,7 @@ export default function AnalyticsSuite({ activeCustomer }) {
                   className="w-full bg-white border border-slate-200 rounded-lg p-1.5 font-medium text-slate-800"
                 >
                   <option value="">All Segments</option>
+                  <option value="New Shopper">New Shopper</option>
                   <option value="Premium">Premium</option>
                   <option value="Gold">Gold</option>
                   <option value="Regular">Regular</option>
@@ -973,65 +1036,181 @@ export default function AnalyticsSuite({ activeCustomer }) {
 
           {/* Budget Intelligence & Customer Variance Section */}
           {budgetIntel && (
-            <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-              {/* Top Budget Overruns */}
-              <div className="bg-white p-6 rounded-2xl border border-slate-200 shadow-xs space-y-3">
-                <h3 className="font-bold text-slate-900 text-sm flex items-center gap-2">
-                  <AlertTriangle className="w-4 h-4 text-rose-500" />
-                  <span>Significant Budget Overruns (Fact_Budget_Performance)</span>
-                </h3>
-                <div className="divide-y divide-slate-100 border border-slate-100 rounded-xl overflow-hidden text-xs">
-                  {budgetIntel.topOverruns.slice(0, 6).map((item, idx) => (
-                    <div key={idx} className="p-3 flex items-center justify-between hover:bg-slate-50">
-                      <div>
-                        <div className="font-bold text-slate-800">{item.customer_name} ({item.city})</div>
-                        <div className="text-[11px] text-slate-500">
-                          Month: {item.month_year} • Budget: ₹{item.monthly_budget}
-                        </div>
-                      </div>
-                      <div className="text-right">
-                        <div className="font-bold text-rose-600">
-                          +₹{Number(item.variance_amount).toFixed(2)}
-                        </div>
-                        <span className="text-[10px] bg-rose-100 text-rose-800 font-extrabold px-1.5 py-0.2 rounded">
-                          {Number(item.utilization_rate).toFixed(0)}% used
-                        </span>
-                      </div>
+            <div className="space-y-6">
+              {/* Active Customer Budget Intelligence Banner if selected */}
+              {budgetIntel.customerProfile && budgetIntel.customerProfile.customer && (
+                <div className="bg-gradient-to-r from-indigo-900 via-slate-900 to-indigo-950 text-white rounded-2xl p-5 border border-indigo-700/60 shadow-md flex flex-col md:flex-row items-start md:items-center justify-between gap-4">
+                  <div className="space-y-1">
+                    <div className="flex items-center gap-2">
+                      <span className="text-[10px] uppercase font-bold tracking-wider px-2 py-0.5 rounded-full bg-emerald-500/20 text-emerald-300 border border-emerald-400/30">
+                        Active Shopper Intelligence
+                      </span>
+                      <span className="text-xs text-indigo-300 font-mono">
+                        {budgetIntel.customerProfile.customer.customer_id}
+                      </span>
                     </div>
-                  ))}
+                    <h3 className="text-base font-extrabold text-white flex items-center gap-2">
+                      <span>{budgetIntel.customerProfile.customer.customer_name}</span>
+                      <span className="text-xs font-semibold text-slate-300">({budgetIntel.customerProfile.customer.city})</span>
+                      <span className="text-[10px] font-bold px-2 py-0.2 rounded-md bg-indigo-500/30 text-indigo-200">
+                        {budgetIntel.customerProfile.customer.segment}
+                      </span>
+                    </h3>
+                    <p className="text-xs text-slate-300">
+                      {budgetIntel.customerProfile.comparisonText || 'Historical spending records in Fact_Budget_Performance are active and monitored in real-time.'}
+                    </p>
+                  </div>
+                  <div className="bg-white/10 rounded-xl p-3 border border-white/15 text-right shrink-0">
+                    <span className="text-[10px] text-slate-300 block uppercase font-bold">Historical Monthly Avg</span>
+                    <strong className="text-sm font-black text-emerald-300">
+                      ₹{Math.round(budgetIntel.customerProfile.historicalAvgSpent || 0).toLocaleString('en-IN')}
+                    </strong>
+                  </div>
+                </div>
+              )}
+
+              <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                {/* Top Budget Overruns */}
+                <div className="bg-white p-6 rounded-2xl border border-slate-200 shadow-xs space-y-3">
+                  <h3 className="font-bold text-slate-900 text-sm flex items-center gap-2">
+                    <AlertTriangle className="w-4 h-4 text-rose-500" />
+                    <span>Significant Budget Overruns (Fact_Budget_Performance)</span>
+                  </h3>
+                  <div className="divide-y divide-slate-100 border border-slate-100 rounded-xl overflow-hidden text-xs">
+                    {budgetIntel.topOverruns.slice(0, 6).map((item, idx) => (
+                      <div key={idx} className="p-3 flex items-center justify-between hover:bg-slate-50">
+                        <div>
+                          <div className="font-bold text-slate-800">{item.customer_name} ({item.city})</div>
+                          <div className="text-[11px] text-slate-500">
+                            Month: {item.month_year} • Budget: ₹{item.monthly_budget}
+                          </div>
+                        </div>
+                        <div className="text-right">
+                          <div className="font-bold text-rose-600">
+                            +₹{Number(item.variance_amount).toFixed(2)}
+                          </div>
+                          <span className="text-[10px] bg-rose-100 text-rose-800 font-extrabold px-1.5 py-0.2 rounded">
+                            {Number(item.utilization_rate).toFixed(0)}% used
+                          </span>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+
+                {/* Customer Segmentation (RFM Mining) */}
+                <div className="bg-white p-6 rounded-2xl border border-slate-200 shadow-xs space-y-3">
+                  <h3 className="font-bold text-slate-900 text-sm flex items-center gap-2">
+                    <Users className="w-4 h-4 text-purple-600" />
+                    <span>Customer Clusters & RFM Spend Tiers</span>
+                  </h3>
+                  <div className="space-y-3">
+                    {customerSegments.map((seg) => (
+                      <div key={seg.segment} className="bg-slate-50 p-3.5 rounded-xl border border-slate-200/80 flex items-center justify-between text-xs">
+                        <div>
+                          <div className="font-black text-slate-900 text-sm flex items-center gap-2">
+                            <span>{seg.segment} Segment</span>
+                            <span className="text-[10px] bg-indigo-100 text-indigo-800 px-1.5 py-0.2 rounded font-bold">
+                              {seg.customer_count} Customers
+                            </span>
+                          </div>
+                          <div className="text-slate-500 mt-1">
+                            Avg Item Revenue: ₹{Number(seg.avg_order_revenue).toFixed(2)}
+                          </div>
+                        </div>
+                        <div className="text-right">
+                          <div className="text-sm font-black text-slate-900">
+                            ₹{Number(seg.total_revenue).toLocaleString('en-IN', { maximumFractionDigits: 0 })}
+                          </div>
+                          <span className="text-[10px] text-slate-400">Total Segment Revenue</span>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
                 </div>
               </div>
 
-              {/* Customer Segmentation (RFM Mining) */}
-              <div className="bg-white p-6 rounded-2xl border border-slate-200 shadow-xs space-y-3">
-                <h3 className="font-bold text-slate-900 text-sm flex items-center gap-2">
-                  <Users className="w-4 h-4 text-purple-600" />
-                  <span>Customer Clusters & RFM Spend Tiers</span>
-                </h3>
-                <div className="space-y-3">
-                  {customerSegments.map((seg) => (
-                    <div key={seg.segment} className="bg-slate-50 p-3.5 rounded-xl border border-slate-200/80 flex items-center justify-between text-xs">
-                      <div>
-                        <div className="font-black text-slate-900 text-sm flex items-center gap-2">
-                          <span>{seg.segment} Segment</span>
-                          <span className="text-[10px] bg-indigo-100 text-indigo-800 px-1.5 py-0.2 rounded font-bold">
-                            {seg.customer_count} Customers
-                          </span>
-                        </div>
-                        <div className="text-slate-500 mt-1">
-                          Avg Item Revenue: ₹{Number(seg.avg_order_revenue).toFixed(2)}
-                        </div>
-                      </div>
-                      <div className="text-right">
-                        <div className="text-sm font-black text-slate-900">
-                          ₹{Number(seg.total_revenue).toLocaleString('en-IN', { maximumFractionDigits: 0 })}
-                        </div>
-                        <span className="text-[10px] text-slate-400">Total Segment Revenue</span>
-                      </div>
+              {/* Live Fact Table: Fact_Budget_Performance for All Shoppers & New Users */}
+              {budgetIntel.recentBudgetFacts && budgetIntel.recentBudgetFacts.length > 0 && (
+                <div className="bg-white p-6 rounded-2xl border border-slate-200 shadow-xs space-y-4">
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <h3 className="font-bold text-slate-900 text-sm flex items-center gap-2">
+                        <Database className="w-4 h-4 text-indigo-600" />
+                        <span>Data Warehouse Fact Table: <code className="text-indigo-800 bg-indigo-50 px-1.5 py-0.5 rounded text-xs font-mono">Fact_Budget_Performance</code></span>
+                      </h3>
+                      <p className="text-xs text-slate-500 mt-0.5">
+                        Live analytical fact measurements across all shoppers, including newly registered user budget performance records.
+                      </p>
                     </div>
-                  ))}
+                    <span className="text-[11px] font-extrabold bg-indigo-100 text-indigo-800 px-2.5 py-1 rounded-full border border-indigo-200">
+                      Live Analytical Grain
+                    </span>
+                  </div>
+
+                  <div className="overflow-x-auto border border-slate-200 rounded-xl">
+                    <table className="w-full text-left text-xs">
+                      <thead className="bg-slate-50 text-slate-600 font-bold uppercase tracking-wider border-b border-slate-200">
+                        <tr>
+                          <th className="py-2.5 px-3">Customer</th>
+                          <th className="py-2.5 px-3">Segment</th>
+                          <th className="py-2.5 px-3">Month</th>
+                          <th className="py-2.5 px-3 text-right">Allocated Budget</th>
+                          <th className="py-2.5 px-3 text-right">Actual Spent</th>
+                          <th className="py-2.5 px-3 text-right">Variance Amount</th>
+                          <th className="py-2.5 px-3 text-right">Utilization</th>
+                          <th className="py-2.5 px-3 text-center">Status</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-slate-100">
+                        {budgetIntel.recentBudgetFacts.map((row) => (
+                          <tr key={row.budget_fact_id} className="hover:bg-slate-50">
+                            <td className="py-2.5 px-3">
+                              <span className="font-bold text-slate-900 block">{row.customer_name}</span>
+                              <span className="font-mono text-[10px] text-slate-400">{row.customer_id} • {row.city}</span>
+                            </td>
+                            <td className="py-2.5 px-3">
+                              <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full uppercase ${
+                                row.segment === 'New Shopper'
+                                  ? 'bg-amber-100 text-amber-800 border border-amber-300'
+                                  : row.segment === 'Premium'
+                                  ? 'bg-purple-100 text-purple-800 border border-purple-200'
+                                  : 'bg-slate-100 text-slate-700'
+                              }`}>
+                                {row.segment || 'Shopper'}
+                              </span>
+                            </td>
+                            <td className="py-2.5 px-3 font-semibold text-slate-700">{row.month_year}</td>
+                            <td className="py-2.5 px-3 text-right font-bold text-slate-900">
+                              ₹{Number(row.monthly_budget).toLocaleString('en-IN', { maximumFractionDigits: 0 })}
+                            </td>
+                            <td className="py-2.5 px-3 text-right font-black text-slate-900">
+                              ₹{Number(row.actual_spent).toLocaleString('en-IN', { maximumFractionDigits: 0 })}
+                            </td>
+                            <td className={`py-2.5 px-3 text-right font-bold ${row.variance_amount > 0 ? 'text-rose-600' : 'text-emerald-700'}`}>
+                              {row.variance_amount > 0 ? '+' : ''}₹{Number(row.variance_amount).toLocaleString('en-IN', { maximumFractionDigits: 0 })}
+                            </td>
+                            <td className="py-2.5 px-3 text-right font-semibold text-slate-700">
+                              {Number(row.utilization_rate).toFixed(1)}%
+                            </td>
+                            <td className="py-2.5 px-3 text-center">
+                              <span className={`text-[10px] font-extrabold px-2 py-0.5 rounded-full uppercase ${
+                                row.status === 'OVER_BUDGET'
+                                  ? 'bg-rose-100 text-rose-700 border border-rose-200'
+                                  : row.status === 'NEAR_LIMIT'
+                                  ? 'bg-amber-100 text-amber-800 border border-amber-200'
+                                  : 'bg-emerald-100 text-emerald-800 border border-emerald-200'
+                              }`}>
+                                {row.status}
+                              </span>
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
                 </div>
-              </div>
+              )}
             </div>
           )}
         </div>

@@ -14,6 +14,24 @@ function getKPIs() {
     FROM fact_sales
   `).get();
 
+  const totalRegisteredCust = db.prepare(`
+    SELECT COUNT(*) AS total_registered FROM dim_customer
+  `).get();
+
+  const newShoppersSummary = db.prepare(`
+    SELECT COUNT(*) AS new_shoppers FROM dim_customer WHERE segment = 'New Shopper'
+  `).get();
+
+  const recentRegistered = db.prepare(`
+    SELECT c.customer_id, c.customer_name, c.city, c.segment, b.monthly_budget
+    FROM dim_customer c
+    LEFT JOIN (
+      SELECT customer_id, monthly_budget FROM budgets GROUP BY customer_id
+    ) b ON c.customer_id = b.customer_id
+    ORDER BY c.customer_key DESC
+    LIMIT 6
+  `).all();
+
   const orderSummary = db.prepare(`
     SELECT AVG(total_amount) AS avg_order_value FROM orders
   `).get();
@@ -59,6 +77,9 @@ function getKPIs() {
     unitsSold: salesSummary.total_units_sold,
     orders: salesSummary.total_orders,
     activeCustomers: salesSummary.active_customers,
+    registeredCustomers: totalRegisteredCust ? totalRegisteredCust.total_registered : salesSummary.active_customers,
+    newShoppers: newShoppersSummary ? newShoppersSummary.new_shoppers : 0,
+    recentCustomers: recentRegistered || [],
     avgOrderValue: orderSummary ? orderSummary.avg_order_value : 0,
     budgetAdherenceRate: budgetSummary.total_budget_evals > 0
       ? ((budgetSummary.under_budget_count / budgetSummary.total_budget_evals) * 100).toFixed(1)
@@ -664,11 +685,32 @@ function getBudgetIntelligence(customerId = null) {
     ORDER BY month_year ASC
   `).all();
 
+  // Recent customer budget fact records (including newly registered users)
+  const recentBudgetFacts = db.prepare(`
+    SELECT 
+      fbp.budget_fact_id,
+      fbp.customer_id,
+      c.customer_name,
+      c.city,
+      c.segment,
+      fbp.month_year,
+      fbp.monthly_budget,
+      fbp.actual_spent,
+      fbp.variance_amount,
+      fbp.utilization_rate,
+      fbp.status
+    FROM fact_budget_performance fbp
+    JOIN dim_customer c ON fbp.customer_id = c.customer_id
+    ORDER BY fbp.budget_fact_id DESC
+    LIMIT 15
+  `).all();
+
   return {
     overallAverages,
     topOverruns,
     monthlyTrend,
-    customerProfile
+    customerProfile,
+    recentBudgetFacts: recentBudgetFacts || []
   };
 }
 

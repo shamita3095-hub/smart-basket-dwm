@@ -12,7 +12,8 @@ import {
   ChevronDown,
   Layers,
   Store,
-  LogIn
+  LogIn,
+  UserPlus
 } from 'lucide-react';
 
 export default function Navbar({
@@ -172,11 +173,21 @@ export default function Navbar({
           </nav>
 
           {/* Right Header Actions */}
-          <div className="flex items-center gap-2.5">
+          <div className="flex items-center gap-2 sm:gap-2.5">
+            {/* Quick + New Shopper Action */}
+            <button
+              onClick={() => onOpenLoginModal('register')}
+              className="flex items-center gap-1.5 bg-emerald-50 hover:bg-emerald-100 text-emerald-800 border border-emerald-300 hover:border-emerald-400 rounded-xl px-2.5 py-1.5 transition-all text-xs font-bold shadow-2xs group"
+              title="Create a new customer account with custom budget"
+            >
+              <UserPlus className="w-3.5 h-3.5 text-emerald-600 group-hover:scale-110 transition-transform" />
+              <span className="hidden sm:inline">+ New Shopper</span>
+            </button>
+
             {/* Customer Login / Profile Button */}
             {activeCustomer ? (
               <button
-                onClick={onOpenLoginModal}
+                onClick={() => onOpenLoginModal('signin')}
                 className="flex items-center gap-2 bg-slate-50 hover:bg-emerald-50/60 border border-slate-200 hover:border-emerald-300 rounded-xl px-2.5 py-1.5 transition-all text-left shadow-xs group"
                 title="Click to Switch Customer or View Profile"
               >
@@ -184,8 +195,13 @@ export default function Navbar({
                   {getAvatarInitials(activeCustomer.customer_name)}
                 </div>
                 <div className="hidden sm:block min-w-0 pr-1">
-                  <div className="text-xs font-bold text-slate-800 group-hover:text-emerald-700 truncate max-w-[110px]">
-                    {activeCustomer.customer_name}
+                  <div className="text-xs font-bold text-slate-800 group-hover:text-emerald-700 truncate max-w-[110px] flex items-center gap-1">
+                    <span>{activeCustomer.customer_name}</span>
+                    {activeCustomer.segment === 'New Shopper' && (
+                      <span className="text-[9px] bg-emerald-200 text-emerald-900 px-1 rounded font-black">
+                        New
+                      </span>
+                    )}
                   </div>
                   <div className="text-[10px] text-slate-500 flex items-center gap-1">
                     <span>{activeCustomer.city}</span>
@@ -197,7 +213,7 @@ export default function Navbar({
               </button>
             ) : (
               <button
-                onClick={onOpenLoginModal}
+                onClick={() => onOpenLoginModal('signin')}
                 className="flex items-center gap-1.5 bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold px-3 py-2 rounded-xl transition-all shadow-sm"
               >
                 <LogIn className="w-3.5 h-3.5" />

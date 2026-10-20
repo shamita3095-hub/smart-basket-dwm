@@ -1,4 +1,4 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
 import {
   User,
   LogIn,
@@ -14,20 +14,30 @@ import {
   RefreshCw,
   Mail,
   Building,
-  Check
+  Check,
+  Database
 } from 'lucide-react';
 import { createCustomer } from '../api';
 
 export default function CustomerLoginModal({
   isOpen,
+  initialTab = 'signin',
   onClose,
   customers = [],
   activeCustomer,
   onSelectCustomer,
   onCustomerCreated
 }) {
-  const [activeTab, setActiveTab] = useState('signin'); // 'signin' or 'register'
+  const [activeTab, setActiveTab] = useState(initialTab); // 'signin' or 'register'
   const [search, setSearch] = useState('');
+
+  useEffect(() => {
+    if (isOpen) {
+      setActiveTab(initialTab);
+      setErrorMsg('');
+      setSuccessNotice('');
+    }
+  }, [isOpen, initialTab]);
 
   // Register Form State
   const [formData, setFormData] = useState({
@@ -446,13 +456,18 @@ export default function CustomerLoginModal({
               </div>
 
               {/* Live Preview Card */}
-              <div className="bg-gradient-to-tr from-emerald-50 to-teal-50 border border-emerald-200 rounded-2xl p-4 space-y-2">
-                <span className="text-[10px] uppercase font-bold text-emerald-800 tracking-wider">
-                  New Customer Account Preview
-                </span>
+              <div className="bg-gradient-to-tr from-emerald-50 via-teal-50 to-indigo-50 border border-emerald-200 rounded-2xl p-4 space-y-2.5">
+                <div className="flex items-center justify-between">
+                  <span className="text-[10px] uppercase font-bold text-emerald-800 tracking-wider">
+                    New Customer Account Preview
+                  </span>
+                  <span className="text-[10px] bg-indigo-100 text-indigo-800 font-bold px-2 py-0.5 rounded-full border border-indigo-200">
+                    Live DWM Synced
+                  </span>
+                </div>
                 <div className="flex items-center justify-between">
                   <div className="flex items-center gap-2.5">
-                    <div className="w-9 h-9 rounded-xl bg-emerald-600 text-white font-bold text-xs flex items-center justify-center">
+                    <div className="w-10 h-10 rounded-xl bg-emerald-600 text-white font-bold text-xs flex items-center justify-center shadow-xs">
                       {getAvatarInitials(formData.customerName || 'New User')}
                     </div>
                     <div>
@@ -460,7 +475,7 @@ export default function CustomerLoginModal({
                         {formData.customerName || 'Your Name'}
                       </h4>
                       <p className="text-[11px] text-slate-500">
-                        {formData.city || 'City'} • New Shopper
+                        {formData.city || 'City'} • <span className="font-semibold text-emerald-700">New Shopper</span>
                       </p>
                     </div>
                   </div>
@@ -469,6 +484,17 @@ export default function CustomerLoginModal({
                     <strong className="text-xs font-black text-emerald-700">
                       ₹{Number(formData.monthlyBudget || 0).toLocaleString('en-IN')}
                     </strong>
+                  </div>
+                </div>
+
+                <div className="pt-1.5 border-t border-emerald-200/60 grid grid-cols-2 gap-2 text-[10px] text-slate-600 font-medium">
+                  <div className="flex items-center gap-1.5">
+                    <Check className="w-3 h-3 text-emerald-600" />
+                    <span>OLTP: Customers & Budgets</span>
+                  </div>
+                  <div className="flex items-center gap-1.5">
+                    <Database className="w-3 h-3 text-indigo-600" />
+                    <span>OLAP: Dim_Customer & Fact_Budget</span>
                   </div>
                 </div>
               </div>

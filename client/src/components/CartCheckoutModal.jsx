@@ -15,9 +15,11 @@ import {
   AlertCircle,
   Wallet,
   AlertTriangle,
-  Receipt
+  Receipt,
+  User,
+  UserPlus
 } from 'lucide-react';
-import { fetchRecommendations } from '../api';
+import { fetchRecommendations, createCustomer } from '../api';
 
 export default function CartCheckoutModal({
   isOpen,
@@ -31,7 +33,9 @@ export default function CartCheckoutModal({
   activeCustomer,
   onCheckoutComplete,
   budgetStatus,
-  appMode = 'customer'
+  appMode = 'customer',
+  onRegisterCustomer,
+  onOpenLoginModal
 }) {
   const [selectedStore, setSelectedStore] = useState('');
   const [paymentMethod, setPaymentMethod] = useState('UPI');
@@ -39,6 +43,11 @@ export default function CartCheckoutModal({
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [recommendations, setRecommendations] = useState([]);
   const [orderSuccess, setOrderSuccess] = useState(null);
+
+  // Quick New User checkout state if not signed in
+  const [guestName, setGuestName] = useState('');
+  const [guestCity, setGuestCity] = useState('Mumbai');
+  const [guestBudget, setGuestBudget] = useState(10000);
 
   const isCustomerMode = appMode === 'customer';
   const cartItems = Object.values(cart);
@@ -79,8 +88,26 @@ export default function CartCheckoutModal({
 
     setIsSubmitting(true);
     try {
+      let customerToUse = activeCustomer;
+      if (!customerToUse) {
+        if (!guestName.trim()) {
+          alert('Please enter your full name to create an account and place your order.');
+          setIsSubmitting(false);
+          return;
+        }
+        const createdCust = await createCustomer({
+          customerName: guestName.trim(),
+          city: guestCity.trim() || 'Mumbai',
+          monthlyBudget: Number(guestBudget) || 10000
+        });
+        customerToUse = createdCust;
+        if (onRegisterCustomer) {
+          onRegisterCustomer(createdCust);
+        }
+      }
+
       const payload = {
-        customerId: activeCustomer.customer_id,
+        customerId: customerToUse.customer_id,
         storeId: selectedStore || (stores[0]?.store_id || 'STORE_500'),
         items: cartItems.map(i => ({
           productId: i.product_id,
@@ -94,6 +121,8 @@ export default function CartCheckoutModal({
       const result = await onCheckoutComplete(payload);
       setOrderSuccess({
         ...result,
+        customerName: customerToUse.customer_name,
+        city: customerToUse.city,
         totalAmount: subtotal,
         itemCount: cartItems.length,
         paymentMethod,
@@ -119,7 +148,7 @@ export default function CartCheckoutModal({
             <div>
               <h2 className="text-base font-extrabold text-slate-900">Your Shopping Cart</h2>
               <p className="text-[11px] text-slate-500">
-                Shopper: <span className="font-bold text-slate-700">{activeCustomer?.customer_name}</span> ({activeCustomer?.city})
+                Shopper: <span className="font-bold text-slate-700">{activeCustomer ? `${activeCustomer.customer_name} (${activeCustomer.city})` : 'New Shopper Guest'}</span>
               </p>
             </div>
           </div>
@@ -388,6 +417,92 @@ export default function CartCheckoutModal({
 
               {/* Checkout Form */}
               <form onSubmit={handleCheckout} className="space-y-4 pt-1">
+                {/* Guest / New Shopper Info Section */}
+                {!activeCustomer && (
+                  <div className="bg-emerald-50/70 border border-emerald-200 rounded-2xl p-4 space-y-3">
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center gap-2">
+                        <UserPlus className="w-4 h-4 text-emerald-700" />
+                        <h4 className="text-xs font-bold text-emerald-950 uppercase tracking-wide">
+                          New Shopper Account Setup
+                        </h4>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => onOpenLoginModal && onOpenLoginModal('signin')}
+                        className="text-[11px] font-bold text-emerald-700 underline"
+                      >
+                        Sign in existing
+                      </button>
+                    </div>
+
+                    <div className="space-y-2.5">
+                      <div>
+                        <label className="block text-[11px] font-bold text-slate-700 mb-1">
+                          Full Name *
+                        </label>
+                        <input
+                          type="text"
+                          required
+                          placeholder="e.g. Shamita Chavan"
+                          value={guestName}
+                          onChange={(e) => setGuestName(e.target.value)}
+                          className="w-full text-xs bg-white border border-slate-200 rounded-xl px-3 py-2 font-medium focus:ring-2 focus:ring-emerald-500 outline-none"
+                        />
+                      </div>
+
+                      <div className="grid grid-cols-2 gap-2">
+                        <div>
+                          <label className="block text-[11px] font-bold text-slate-700 mb-1">
+                            City
+                          </label>
+                          <input
+                            type="text"
+                            placeholder="e.g. Mumbai"
+                            value={guestCity}
+                            onChange={(e) => setGuestCity(e.target.value)}
+                            className="w-full text-xs bg-white border border-slate-200 rounded-xl px-3 py-2 font-medium focus:ring-2 focus:ring-emerald-500 outline-none"
+                          />
+                        </div>
+                        <div>
+                          <label className="block text-[11px] font-bold text-slate-700 mb-1">
+                            Monthly Budget (₹)
+                          </label>
+                          <input
+                            type="number"
+                            min="500"
+                            step="500"
+                            value={guestBudget}
+                            onChange={(e) => setGuestBudget(e.target.value)}
+                            className="w-full text-xs bg-white border border-slate-200 rounded-xl px-3 py-2 font-bold text-emerald-800 focus:ring-2 focus:ring-emerald-500 outline-none"
+                          />
+                        </div>
+                      </div>
+                      <p className="text-[10px] text-slate-500">
+                        ⚡ Placing order automatically registers your account, saves your budget in OLTP, and syncs into DWM analytics.
+                      </p>
+                    </div>
+                  </div>
+                )}
+
+                {activeCustomer && (
+                  <div className="bg-slate-50 border border-slate-200 rounded-xl px-3.5 py-2.5 flex items-center justify-between text-xs">
+                    <div className="flex items-center gap-2">
+                      <User className="w-3.5 h-3.5 text-slate-500" />
+                      <span className="text-slate-600">
+                        Ordering as <strong className="text-slate-900 font-bold">{activeCustomer.customer_name}</strong> ({activeCustomer.city})
+                      </span>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => onOpenLoginModal && onOpenLoginModal('register')}
+                      className="text-[11px] text-emerald-700 font-bold hover:underline"
+                    >
+                      + New Shopper
+                    </button>
+                  </div>
+                )}
+
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5">
                   {/* Store Selector */}
                   <div>

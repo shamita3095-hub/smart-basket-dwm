@@ -28,6 +28,7 @@ export default function App() {
   const [customers, setCustomers] = useState([]);
   const [activeCustomer, setActiveCustomer] = useState(null);
   const [isLoginModalOpen, setIsLoginModalOpen] = useState(false);
+  const [loginModalTab, setLoginModalTab] = useState('signin');
 
   const [categories, setCategories] = useState([]);
   const [products, setProducts] = useState([]);
@@ -111,6 +112,16 @@ export default function App() {
     if (customer?.customer_id) {
       localStorage.setItem('smartbasket_customer_id', customer.customer_id);
     }
+  };
+
+  const handleOpenLoginModal = (tab = 'signin') => {
+    setLoginModalTab(tab);
+    setIsLoginModalOpen(true);
+  };
+
+  const handleCustomerCreated = (newCust) => {
+    setCustomers(prev => [newCust, ...prev]);
+    handleSelectCustomer(newCust);
   };
 
   // Cart Handlers
@@ -245,7 +256,7 @@ export default function App() {
         customers={customers}
         activeCustomer={activeCustomer}
         setActiveCustomer={handleSelectCustomer}
-        onOpenLoginModal={() => setIsLoginModalOpen(true)}
+        onOpenLoginModal={handleOpenLoginModal}
         cartItemCount={cartItemCount}
         setIsCartOpen={setIsCartOpen}
         shoppingListItemCount={shoppingList.items?.length || 0}
@@ -273,7 +284,7 @@ export default function App() {
                 shoppingListProductIds={shoppingListProductIds}
                 activeCustomer={activeCustomer}
                 budgetStatus={budgetStatus}
-                onOpenLoginModal={() => setIsLoginModalOpen(true)}
+                onOpenLoginModal={handleOpenLoginModal}
                 onNavigateToBudget={() => setActiveTab('budget')}
                 onOpenCart={() => setIsCartOpen(true)}
                 cartItemCount={cartItemCount}
@@ -323,18 +334,19 @@ export default function App() {
         onCheckoutComplete={handleCheckoutComplete}
         budgetStatus={budgetStatus}
         appMode={appMode}
+        onRegisterCustomer={handleCustomerCreated}
+        onOpenLoginModal={handleOpenLoginModal}
       />
 
       {/* Customer Login / Switcher Modal */}
       <CustomerLoginModal
         isOpen={isLoginModalOpen}
+        initialTab={loginModalTab}
         onClose={() => setIsLoginModalOpen(false)}
         customers={customers}
         activeCustomer={activeCustomer}
         onSelectCustomer={handleSelectCustomer}
-        onCustomerCreated={(newCust) => {
-          setCustomers(prev => [newCust, ...prev]);
-        }}
+        onCustomerCreated={handleCustomerCreated}
       />
 
       {/* Footer */}

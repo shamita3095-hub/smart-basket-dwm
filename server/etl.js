@@ -85,7 +85,8 @@ function runETL(options = { incremental: false }) {
           WHEN IFNULL(spend.total_spent, 0) >= 20000 THEN 'Premium'
           WHEN IFNULL(spend.total_spent, 0) >= 8000 THEN 'Gold'
           WHEN IFNULL(spend.total_spent, 0) >= 3000 THEN 'Regular'
-          ELSE 'Budget'
+          WHEN IFNULL(spend.total_spent, 0) > 0 THEN 'Budget'
+          ELSE 'New Shopper'
         END AS segment
       FROM customers c
       LEFT JOIN (
@@ -161,7 +162,32 @@ function runETL(options = { incremental: false }) {
         );
       }
     }
-    logs.push(`[ETL:TRANSFORM] Resolved and verified ${dateMap.size} unique calendar dates in Dim_Date.`);
+
+    // Ensure dates for any calendar months present in Budgets are also populated in Dim_Date
+    try {
+      const budgetMonths = db.prepare('SELECT DISTINCT month_year FROM budgets WHERE month_year IS NOT NULL').all();
+      for (const bm of budgetMonths) {
+        if (bm.month_year && bm.month_year.length === 7) {
+          const firstDay = `${bm.month_year}-01`;
+          if (!dateMap.has(firstDay)) {
+            const dInfo = parseDateString(firstDay);
+            dateMap.set(firstDay, dInfo);
+            insertDateStmt.run(
+              dInfo.dateId,
+              dInfo.fullDate,
+              dInfo.day,
+              dInfo.month,
+              dInfo.monthName,
+              dInfo.quarter,
+              dInfo.year,
+              dInfo.dayOfWeek
+            );
+          }
+        }
+      }
+    } catch (_) {}
+
+    logs.push(`[ETL:TRANSFORM] Resolved and verified calendar dates in Dim_Date.`);
 
     // ----------------------------------------------------
     // STEP 4: TRANSFORM & LOAD FACT_SALES
@@ -221,26 +247,36 @@ function runETL(options = { incremental: false }) {
     // STEP 5: TRANSFORM & LOAD FACT_BUDGET_PERFORMANCE
     // ----------------------------------------------------
     // Aggregate customer spending by month, compare against monthly_budget, compute variance & status
+    // Supports all customers including newly registered shoppers with zero or active spending
     const budgetFactsStmt = db.prepare(`
-      WITH MonthlyActuals AS (
+      WITH CustomerSpending AS (
         SELECT 
-          o.customer_id,
+          fs.customer_id,
           SUBSTR(d.full_date, 1, 7) AS month_year,
           MIN(d.date_id) AS date_id,
           SUM(fs.total_amount) AS actual_spent
         FROM fact_sales fs
         JOIN dim_date d ON fs.date_id = d.date_id
-        JOIN orders o ON fs.order_id = o.order_id
-        GROUP BY o.customer_id, SUBSTR(d.full_date, 1, 7)
+        GROUP BY fs.customer_id, SUBSTR(d.full_date, 1, 7)
+      ),
+      AllCustomerMonths AS (
+        SELECT customer_id, month_year FROM CustomerSpending
+        UNION
+        SELECT customer_id, month_year FROM budgets
       )
       SELECT 
-        ma.customer_id,
-        ma.date_id,
-        ma.month_year,
-        COALESCE(b.monthly_budget, (SELECT monthly_budget FROM budgets WHERE customer_id = ma.customer_id ORDER BY month_year DESC LIMIT 1), 10000.0) AS monthly_budget,
-        ma.actual_spent
-      FROM MonthlyActuals ma
-      LEFT JOIN budgets b ON ma.customer_id = b.customer_id AND ma.month_year = b.month_year
+        acm.customer_id,
+        COALESCE(
+          cs.date_id,
+          (SELECT MIN(date_id) FROM dim_date WHERE full_date LIKE acm.month_year || '%'),
+          CAST(REPLACE(acm.month_year || '-01', '-', '') AS INTEGER)
+        ) AS date_id,
+        acm.month_year,
+        COALESCE(b.monthly_budget, (SELECT monthly_budget FROM budgets WHERE customer_id = acm.customer_id ORDER BY month_year DESC LIMIT 1), 10000.0) AS monthly_budget,
+        COALESCE(cs.actual_spent, 0.0) AS actual_spent
+      FROM AllCustomerMonths acm
+      LEFT JOIN CustomerSpending cs ON acm.customer_id = cs.customer_id AND acm.month_year = cs.month_year
+      LEFT JOIN budgets b ON acm.customer_id = b.customer_id AND acm.month_year = b.month_year
     `);
 
     const budgetActuals = budgetFactsStmt.all();

@@ -64,102 +64,155 @@ export default function StoreCatalog({
     <div className="space-y-6">
       {/* Customer Profile & Live Budget Tracker Bar */}
       {activeCustomer ? (
-        <div className="bg-white rounded-2xl border border-slate-200/90 p-4 sm:p-5 shadow-xs flex flex-col md:flex-row items-stretch md:items-center justify-between gap-4">
-          <div className="flex items-center gap-3.5">
-            <div className="w-12 h-12 rounded-2xl bg-gradient-to-tr from-emerald-600 via-teal-600 to-emerald-500 text-white font-black text-base flex items-center justify-center shadow-md shadow-emerald-500/20 shrink-0">
-              {getAvatarInitials(activeCustomer.customer_name)}
-            </div>
-            <div>
-              <div className="flex items-center gap-2">
-                <h2 className="text-base font-extrabold text-slate-900">
-                  Welcome, {activeCustomer.customer_name}
-                </h2>
-                <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-800">
-                  {activeCustomer.city}
-                </span>
+        <div className="space-y-3">
+          <div className="bg-white rounded-2xl border border-slate-200/90 p-4 sm:p-5 shadow-xs flex flex-col md:flex-row items-stretch md:items-center justify-between gap-4">
+            <div className="flex items-center gap-3.5">
+              <div className="w-12 h-12 rounded-2xl bg-gradient-to-tr from-emerald-600 via-teal-600 to-emerald-500 text-white font-black text-base flex items-center justify-center shadow-md shadow-emerald-500/20 shrink-0">
+                {getAvatarInitials(activeCustomer.customer_name)}
               </div>
-              <p className="text-xs text-slate-500 flex items-center gap-2 mt-0.5">
-                <span>Personalized Shopping & Budget Portal</span>
-                <span>•</span>
-                <button
-                  onClick={onOpenLoginModal}
-                  className="text-emerald-700 hover:text-emerald-800 font-bold underline"
-                >
-                  Switch User
-                </button>
-              </p>
+              <div>
+                <div className="flex items-center gap-2 flex-wrap">
+                  <h2 className="text-base font-extrabold text-slate-900">
+                    Welcome, {activeCustomer.customer_name}
+                  </h2>
+                  <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-800">
+                    {activeCustomer.city}
+                  </span>
+                  {activeCustomer.segment === 'New Shopper' && (
+                    <span className="text-[10px] font-black px-2 py-0.5 rounded-full bg-amber-100 text-amber-800 border border-amber-300">
+                      New Shopper
+                    </span>
+                  )}
+                </div>
+                <p className="text-xs text-slate-500 flex items-center gap-2 mt-0.5">
+                  <span>Personalized Shopping & Budget Portal</span>
+                  <span>•</span>
+                  <button
+                    onClick={() => onOpenLoginModal('signin')}
+                    className="text-emerald-700 hover:text-emerald-800 font-bold underline"
+                  >
+                    Switch User
+                  </button>
+                  <span>•</span>
+                  <button
+                    onClick={() => onOpenLoginModal('register')}
+                    className="text-emerald-700 hover:text-emerald-800 font-bold underline"
+                  >
+                    + Register New Shopper
+                  </button>
+                </p>
+              </div>
+            </div>
+
+            {/* Quick Budget & Cart Pills */}
+            <div className="flex flex-wrap items-center gap-2.5 sm:gap-3">
+              {/* Monthly Budget Card */}
+              <div
+                onClick={onNavigateToBudget}
+                className={`cursor-pointer px-3.5 py-2 rounded-xl border transition-all flex items-center gap-2.5 ${
+                  isOverBudget
+                    ? 'bg-rose-50 border-rose-200 hover:border-rose-300'
+                    : 'bg-slate-50 border-slate-200 hover:border-emerald-300'
+                }`}
+                title="Click to view detailed Budget Planner"
+              >
+                <div className={`p-1.5 rounded-lg ${isOverBudget ? 'bg-rose-500 text-white' : 'bg-emerald-600 text-white'}`}>
+                  {isOverBudget ? <AlertTriangle className="w-4 h-4" /> : <Wallet className="w-4 h-4" />}
+                </div>
+                <div>
+                  <div className="text-[10px] uppercase font-bold text-slate-500">
+                    {isOverBudget ? 'Budget Exceeded' : 'Remaining Budget'}
+                  </div>
+                  <div className={`text-xs sm:text-sm font-black ${isOverBudget ? 'text-rose-600' : 'text-slate-900'}`}>
+                    {isOverBudget
+                      ? `Over by ₹${Math.abs(Math.round(remaining)).toLocaleString('en-IN')}`
+                      : `₹${Math.round(remaining).toLocaleString('en-IN')} Left`}
+                  </div>
+                </div>
+              </div>
+
+              {/* Total Spent Card */}
+              <div
+                onClick={onNavigateToBudget}
+                className="cursor-pointer px-3.5 py-2 rounded-xl border border-slate-200 bg-slate-50 hover:border-emerald-300 transition-all flex items-center gap-2.5"
+              >
+                <div>
+                  <div className="text-[10px] uppercase font-bold text-slate-500">Month Spend</div>
+                  <div className="text-xs sm:text-sm font-black text-slate-800">
+                    ₹{Math.round(currentSpent).toLocaleString('en-IN')}{' '}
+                    <span className="text-[10px] font-normal text-slate-500">
+                      / ₹{Math.round(monthlyBudget).toLocaleString('en-IN')}
+                    </span>
+                  </div>
+                </div>
+              </div>
+
+              {/* Quick Button to Budget Planner */}
+              <button
+                onClick={onNavigateToBudget}
+                className="px-3 py-2 bg-emerald-50 hover:bg-emerald-100 text-emerald-800 border border-emerald-200 rounded-xl text-xs font-bold transition-all flex items-center gap-1.5"
+              >
+                <span>Planner</span>
+                <ArrowRight className="w-3.5 h-3.5" />
+              </button>
             </div>
           </div>
 
-          {/* Quick Budget & Cart Pills */}
-          <div className="flex flex-wrap items-center gap-2.5 sm:gap-3">
-            {/* Monthly Budget Card */}
-            <div
-              onClick={onNavigateToBudget}
-              className={`cursor-pointer px-3.5 py-2 rounded-xl border transition-all flex items-center gap-2.5 ${
-                isOverBudget
-                  ? 'bg-rose-50 border-rose-200 hover:border-rose-300'
-                  : 'bg-slate-50 border-slate-200 hover:border-emerald-300'
-              }`}
-              title="Click to view detailed Budget Planner"
-            >
-              <div className={`p-1.5 rounded-lg ${isOverBudget ? 'bg-rose-500 text-white' : 'bg-emerald-600 text-white'}`}>
-                {isOverBudget ? <AlertTriangle className="w-4 h-4" /> : <Wallet className="w-4 h-4" />}
-              </div>
-              <div>
-                <div className="text-[10px] uppercase font-bold text-slate-500">
-                  {isOverBudget ? 'Budget Exceeded' : 'Remaining Budget'}
+          {/* New Shopper Active Alert Banner */}
+          {activeCustomer.segment === 'New Shopper' && (
+            <div className="bg-gradient-to-r from-emerald-700 via-teal-700 to-emerald-900 text-white rounded-2xl p-4 shadow-sm flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 animate-in fade-in">
+              <div className="flex items-center gap-3">
+                <div className="p-2 bg-white/20 rounded-xl shrink-0">
+                  <Sparkles className="w-5 h-5 text-amber-300" />
                 </div>
-                <div className={`text-xs sm:text-sm font-black ${isOverBudget ? 'text-rose-600' : 'text-slate-900'}`}>
-                  {isOverBudget
-                    ? `Over by ₹${Math.abs(Math.round(remaining)).toLocaleString('en-IN')}`
-                    : `₹${Math.round(remaining).toLocaleString('en-IN')} Left`}
+                <div>
+                  <h4 className="font-extrabold text-sm flex items-center gap-2 flex-wrap">
+                    <span>New Shopper Account Active!</span>
+                    <span className="bg-amber-300 text-emerald-950 text-[10px] px-2 py-0.5 rounded-full font-black uppercase">
+                      ₹{Math.round(monthlyBudget).toLocaleString('en-IN')} Budget Ready
+                    </span>
+                  </h4>
+                  <p className="text-xs text-emerald-100 mt-0.5">
+                    Start shopping below! Your orders and spending are recorded into the Data Warehouse <code className="bg-emerald-950/60 px-1 py-0.5 rounded text-amber-200 font-mono text-[11px]">Fact_Sales</code> & <code className="bg-emerald-950/60 px-1 py-0.5 rounded text-amber-200 font-mono text-[11px]">Fact_Budget_Performance</code> tables in real-time.
+                  </p>
                 </div>
               </div>
+              <button
+                onClick={onNavigateToBudget}
+                className="px-3.5 py-1.5 bg-white hover:bg-emerald-50 text-emerald-900 rounded-xl text-xs font-black transition-all shadow-xs shrink-0 flex items-center gap-1.5"
+              >
+                <span>Budget Planner</span>
+                <ArrowRight className="w-3.5 h-3.5" />
+              </button>
             </div>
-
-            {/* Total Spent Card */}
-            <div
-              onClick={onNavigateToBudget}
-              className="cursor-pointer px-3.5 py-2 rounded-xl border border-slate-200 bg-slate-50 hover:border-emerald-300 transition-all flex items-center gap-2.5"
-            >
-              <div>
-                <div className="text-[10px] uppercase font-bold text-slate-500">Month Spend</div>
-                <div className="text-xs sm:text-sm font-black text-slate-800">
-                  ₹{Math.round(currentSpent).toLocaleString('en-IN')}{' '}
-                  <span className="text-[10px] font-normal text-slate-500">
-                    / ₹{Math.round(monthlyBudget).toLocaleString('en-IN')}
-                  </span>
-                </div>
-              </div>
+          )}
+        </div>
+      ) : (
+        <div className="bg-gradient-to-r from-emerald-50 to-teal-50 border border-emerald-200 rounded-2xl p-4 sm:p-5 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
+          <div className="flex items-center gap-3">
+            <div className="w-10 h-10 rounded-xl bg-emerald-600 text-white flex items-center justify-center font-bold shadow-xs">
+              <User className="w-5 h-5" />
             </div>
-
-            {/* Quick Button to Budget Planner */}
+            <div>
+              <p className="text-xs font-bold text-emerald-950">New to SmartBasket? Shop & Track Your Personal Budget</p>
+              <p className="text-[11px] text-emerald-700">Create a new shopper account in seconds with your custom monthly spending limit.</p>
+            </div>
+          </div>
+          <div className="flex items-center gap-2 w-full sm:w-auto">
             <button
-              onClick={onNavigateToBudget}
-              className="px-3 py-2 bg-emerald-50 hover:bg-emerald-100 text-emerald-800 border border-emerald-200 rounded-xl text-xs font-bold transition-all flex items-center gap-1.5"
+              onClick={() => onOpenLoginModal('signin')}
+              className="flex-1 sm:flex-none px-3.5 py-2 bg-white hover:bg-slate-50 border border-slate-200 text-slate-700 rounded-xl text-xs font-bold transition-all text-center"
             >
-              <span>Planner</span>
+              Select Profile
+            </button>
+            <button
+              onClick={() => onOpenLoginModal('register')}
+              className="flex-1 sm:flex-none px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-bold flex items-center justify-center gap-1.5 transition-all shadow-sm"
+            >
+              <span>+ Create New User</span>
               <ArrowRight className="w-3.5 h-3.5" />
             </button>
           </div>
-        </div>
-      ) : (
-        <div className="bg-emerald-50 border border-emerald-200 rounded-2xl p-4 flex items-center justify-between">
-          <div className="flex items-center gap-3">
-            <User className="w-5 h-5 text-emerald-700" />
-            <div>
-              <p className="text-xs font-bold text-emerald-900">Sign in to track your personal budget</p>
-              <p className="text-[11px] text-emerald-700">Choose your customer profile to customize shopping lists and monthly limits.</p>
-            </div>
-          </div>
-          <button
-            onClick={onOpenLoginModal}
-            className="px-3.5 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-bold flex items-center gap-1.5 transition-all"
-          >
-            <LogIn className="w-3.5 h-3.5" />
-            <span>Login Now</span>
-          </button>
         </div>
       )}
 

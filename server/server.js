@@ -142,7 +142,8 @@ app.post('/api/customers', (req, res) => {
     const numBudget = Number(monthlyBudget) > 0 ? Number(monthlyBudget) : 10000;
 
     const customerId = `CUST_${Date.now()}`;
-    const currentMonthYear = new Date().toISOString().substring(0, 7);
+    const todayStr = new Date().toISOString().substring(0, 10);
+    const currentMonthYear = todayStr.substring(0, 7);
 
     // 1. Insert into OLTP customers table
     db.prepare(`
@@ -150,7 +151,7 @@ app.post('/api/customers', (req, res) => {
       VALUES (?, ?, ?, ?)
     `).run(customerId, cleanName, cleanEmail, cleanCity);
 
-    // 2. Set initial budget
+    // 2. Set initial budget in OLTP budgets table
     db.prepare(`
       INSERT OR REPLACE INTO budgets (customer_id, monthly_budget, month_year)
       VALUES (?, ?, ?)
@@ -159,7 +160,7 @@ app.post('/api/customers', (req, res) => {
     // 3. Insert into Conformed Dimension Dim_Customer
     try {
       db.prepare(`
-        INSERT OR IGNORE INTO dim_customer (customer_id, customer_name, city, segment)
+        INSERT OR REPLACE INTO dim_customer (customer_id, customer_name, city, segment)
         VALUES (?, ?, ?, 'New Shopper')
       `).run(customerId, cleanName, cleanCity);
     } catch {
@@ -173,12 +174,30 @@ app.post('/api/customers', (req, res) => {
       VALUES (?, ?, 'My Smart Shopping List')
     `).run(listId, customerId);
 
+    // 5. Ensure Dim_Date and Fact_Budget_Performance are populated immediately for DWM Analytics
+    try {
+      const dInfo = parseDateString(todayStr);
+      db.prepare(`
+        INSERT OR IGNORE INTO dim_date (date_id, full_date, day, month, month_name, quarter, year, day_of_week)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+      `).run(dInfo.dateId, dInfo.fullDate, dInfo.day, dInfo.month, dInfo.monthName, dInfo.quarter, dInfo.year, dInfo.dayOfWeek);
+
+      db.prepare(`
+        INSERT OR REPLACE INTO fact_budget_performance (
+          customer_id, date_id, month_year, monthly_budget, actual_spent, variance_amount, utilization_rate, status
+        ) VALUES (?, ?, ?, ?, 0.0, ?, 0.0, 'UNDER_BUDGET')
+      `).run(customerId, dInfo.dateId, currentMonthYear, numBudget, -numBudget);
+    } catch (factErr) {
+      console.warn('Initial Fact_Budget sync notice:', factErr.message);
+    }
+
     const newCustomer = {
       customer_id: customerId,
       customer_name: cleanName,
       email: cleanEmail,
       city: cleanCity,
       monthly_budget: numBudget,
+      monthlyBudget: numBudget,
       segment: 'New Shopper'
     };
 
@@ -394,9 +413,29 @@ app.get('/api/budget/:customerId', (req, res) => {
     }
 
     // Historical monthly performance from Fact_Budget_Performance
-    const performanceHistory = db.prepare(`
+    let performanceHistory = db.prepare(`
       SELECT * FROM fact_budget_performance WHERE customer_id = ? ORDER BY month_year DESC
     `).all(customerId);
+
+    // If analytical fact record does not exist yet (e.g. fresh registration), provide synthesized active fact
+    if (performanceHistory.length === 0) {
+      const rate = monthlyBudget > 0 ? (currentSpent / monthlyBudget) * 100 : 0;
+      let status = 'UNDER_BUDGET';
+      if (rate > 100) status = 'OVER_BUDGET';
+      else if (rate >= 80) status = 'NEAR_LIMIT';
+
+      performanceHistory = [{
+        budget_fact_id: 1,
+        customer_id: customerId,
+        date_id: parseInt(monthYear.replace('-', '') + '01', 10),
+        month_year: monthYear,
+        monthly_budget: monthlyBudget,
+        actual_spent: currentSpent,
+        variance_amount: currentSpent - monthlyBudget,
+        utilization_rate: parseFloat(rate.toFixed(1)),
+        status: status
+      }];
+    }
 
     res.json({
       customerId,
@@ -431,11 +470,12 @@ app.post('/api/budget', (req, res) => {
       SELECT * FROM fact_budget_performance WHERE customer_id = ? AND month_year = ?
     `).get(customerId, monthYear);
 
+    const newBudget = parseFloat(monthlyBudget);
+
     if (existingFact) {
-      const newBudget = parseFloat(monthlyBudget);
       const spent = existingFact.actual_spent;
       const variance = spent - newBudget;
-      const rate = newBudget > 0 ? (spent / newBudget) * 100 : 100;
+      const rate = newBudget > 0 ? (spent / newBudget) * 100 : 0;
       let status = 'UNDER_BUDGET';
       if (rate > 100) status = 'OVER_BUDGET';
       else if (rate >= 80) status = 'NEAR_LIMIT';
@@ -445,6 +485,22 @@ app.post('/api/budget', (req, res) => {
         SET monthly_budget = ?, variance_amount = ?, utilization_rate = ?, status = ?
         WHERE budget_fact_id = ?
       `).run(newBudget, variance, rate, status, existingFact.budget_fact_id);
+    } else {
+      // Upsert into analytical layer for new users
+      try {
+        const todayStr = new Date().toISOString().substring(0, 10);
+        const dInfo = parseDateString(todayStr);
+        db.prepare(`
+          INSERT OR IGNORE INTO dim_date (date_id, full_date, day, month, month_name, quarter, year, day_of_week)
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        `).run(dInfo.dateId, dInfo.fullDate, dInfo.day, dInfo.month, dInfo.monthName, dInfo.quarter, dInfo.year, dInfo.dayOfWeek);
+
+        db.prepare(`
+          INSERT OR REPLACE INTO fact_budget_performance (
+            customer_id, date_id, month_year, monthly_budget, actual_spent, variance_amount, utilization_rate, status
+          ) VALUES (?, ?, ?, ?, 0.0, ?, 0.0, 'UNDER_BUDGET')
+        `).run(customerId, dInfo.dateId, monthYear, newBudget, -newBudget);
+      } catch (_) {}
     }
 
     res.json({ success: true, message: 'Budget updated successfully' });
