@@ -50,12 +50,10 @@ export default function CustomerLoginModal({
   const [errorMsg, setErrorMsg] = useState('');
   const [successNotice, setSuccessNotice] = useState('');
 
-  // Curated prominent customer profiles representing different retail personas
+  // Recent customer profiles with newly registered users appearing first
   const featuredProfiles = useMemo(() => {
     if (!customers || customers.length === 0) return [];
-    const ids = ['CUST_1000', 'CUST_1001', 'CUST_1002', 'CUST_1003', 'CUST_1004', 'CUST_1005'];
-    const featured = customers.filter(c => ids.includes(c.customer_id));
-    return featured.length > 0 ? featured : customers.slice(0, 6);
+    return [...customers].slice(0, 6);
   }, [customers]);
 
   // Filtered customer list for full search
@@ -223,25 +221,29 @@ export default function CustomerLoginModal({
               </div>
             )}
 
-            {/* Quick Select Personas */}
+            {/* Quick Select Recent Registered Shoppers */}
             <div>
               <div className="flex items-center justify-between mb-2.5">
                 <label className="text-xs font-bold uppercase tracking-wider text-slate-500 flex items-center gap-1.5">
                   <Sparkles className="w-3.5 h-3.5 text-emerald-600" />
-                  <span>1-Click Popular Shopper Personas</span>
+                  <span>Recent Registered Shoppers (Newest First)</span>
                 </label>
                 <button
                   onClick={() => setActiveTab('register')}
-                  className="text-xs font-bold text-emerald-700 hover:text-emerald-800 underline"
+                  className="text-xs font-bold text-emerald-700 hover:text-emerald-800 underline cursor-pointer"
                 >
-                  + Add Custom User
+                  + Register New User
                 </button>
               </div>
 
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 {featuredProfiles.map((cust, idx) => {
                   const isSelected = activeCustomer?.customer_id === cust.customer_id;
-                  const badge = getPersonaBadge(idx);
+                  const badge = idx === 0
+                    ? { label: '✦ Newest Registered', color: 'bg-emerald-100 text-emerald-800 border-emerald-300' }
+                    : cust.segment === 'New Shopper'
+                    ? { label: 'New Shopper', color: 'bg-teal-100 text-teal-800 border-teal-200' }
+                    : getPersonaBadge(idx);
                   return (
                     <button
                       key={cust.customer_id}

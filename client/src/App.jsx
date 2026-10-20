@@ -6,6 +6,7 @@ import BudgetPlanner from './components/BudgetPlanner';
 import CartCheckoutModal from './components/CartCheckoutModal';
 import AnalyticsSuite from './components/AnalyticsSuite';
 import CustomerLoginModal from './components/CustomerLoginModal';
+import AdminAuthModal from './components/AdminAuthModal';
 import {
   fetchCustomers,
   fetchCategories,
@@ -19,7 +20,12 @@ import {
   fetchBudget,
   updateBudget,
   checkoutOrder,
-  fetchCustomerOrders
+  fetchCustomerOrders,
+  createExpense,
+  updateExpense,
+  deleteExpense,
+  verifyAdminToken,
+  getAdminToken
 } from './api';
 
 export default function App() {
@@ -29,6 +35,7 @@ export default function App() {
   const [activeCustomer, setActiveCustomer] = useState(null);
   const [isLoginModalOpen, setIsLoginModalOpen] = useState(false);
   const [loginModalTab, setLoginModalTab] = useState('signin');
+  const [isAdminModalOpen, setIsAdminModalOpen] = useState(false);
 
   const [categories, setCategories] = useState([]);
   const [products, setProducts] = useState([]);
@@ -235,6 +242,50 @@ export default function App() {
     setBudgetStatus(updated);
   };
 
+  // Expense Handlers
+  const handleAddExpense = async (expenseData) => {
+    if (!activeCustomer) return;
+    await createExpense(expenseData);
+    const my = budgetStatus?.monthYear || new Date().toISOString().substring(0, 7);
+    const updated = await fetchBudget(activeCustomer.customer_id, my);
+    setBudgetStatus(updated);
+  };
+
+  const handleUpdateExpense = async (expenseId, expenseData) => {
+    if (!activeCustomer) return;
+    await updateExpense(expenseId, expenseData);
+    const my = budgetStatus?.monthYear || new Date().toISOString().substring(0, 7);
+    const updated = await fetchBudget(activeCustomer.customer_id, my);
+    setBudgetStatus(updated);
+  };
+
+  const handleDeleteExpense = async (expenseId) => {
+    if (!activeCustomer) return;
+    await deleteExpense(expenseId);
+    const my = budgetStatus?.monthYear || new Date().toISOString().substring(0, 7);
+    const updated = await fetchBudget(activeCustomer.customer_id, my);
+    setBudgetStatus(updated);
+  };
+
+  // Admin Mode Handlers
+  const handleRequestAdminMode = async () => {
+    const token = getAdminToken();
+    if (token) {
+      const isValid = await verifyAdminToken(token);
+      if (isValid) {
+        setAppMode('admin');
+        setActiveTab('analytics');
+        return;
+      }
+    }
+    setIsAdminModalOpen(true);
+  };
+
+  const handleAdminSuccess = (token) => {
+    setAppMode('admin');
+    setActiveTab('analytics');
+  };
+
   // Checkout Handler
   const handleCheckoutComplete = async (orderPayload) => {
     const res = await checkoutOrder(orderPayload);
@@ -269,6 +320,7 @@ export default function App() {
         setIsCartOpen={setIsCartOpen}
         shoppingListItemCount={shoppingList.items?.length || 0}
         budgetStatus={budgetStatus}
+        onRequestAdminMode={handleRequestAdminMode}
       />
 
       <main className="flex-1 max-w-7xl w-full mx-auto px-4 sm:px-6 lg:px-8 py-6">
@@ -318,6 +370,9 @@ export default function App() {
                 onSelectMonth={handleSelectBudgetMonth}
                 activeCustomer={activeCustomer}
                 orderHistory={orderHistory}
+                onAddExpense={handleAddExpense}
+                onUpdateExpense={handleUpdateExpense}
+                onDeleteExpense={handleDeleteExpense}
               />
             )}
 
@@ -359,6 +414,13 @@ export default function App() {
         activeCustomer={activeCustomer}
         onSelectCustomer={handleSelectCustomer}
         onCustomerCreated={handleCustomerCreated}
+      />
+
+      {/* Administrator Authentication Modal */}
+      <AdminAuthModal
+        isOpen={isAdminModalOpen}
+        onClose={() => setIsAdminModalOpen(false)}
+        onSuccess={handleAdminSuccess}
       />
 
       {/* Footer */}

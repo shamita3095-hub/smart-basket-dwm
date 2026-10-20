@@ -48,7 +48,8 @@ function initSchema() {
       customer_id TEXT PRIMARY KEY,
       customer_name TEXT NOT NULL,
       email TEXT,
-      city TEXT
+      city TEXT,
+      created_at TEXT DEFAULT CURRENT_TIMESTAMP
     );
 
     -- 2. Categories
@@ -137,6 +138,20 @@ function initSchema() {
       payment_status TEXT DEFAULT 'SUCCESS',
       payment_date TEXT DEFAULT CURRENT_TIMESTAMP,
       FOREIGN KEY (order_id) REFERENCES orders(order_id)
+    );
+
+    -- 11. Expenses (User-Specific Manual Expense Tracking for Budget Planner)
+    CREATE TABLE IF NOT EXISTS expenses (
+      expense_id TEXT PRIMARY KEY,
+      customer_id TEXT NOT NULL,
+      title TEXT NOT NULL,
+      amount REAL NOT NULL,
+      category TEXT NOT NULL,
+      expense_date TEXT NOT NULL,
+      notes TEXT,
+      created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+      updated_at TEXT DEFAULT CURRENT_TIMESTAMP,
+      FOREIGN KEY (customer_id) REFERENCES customers(customer_id)
     );
 
     -- ============================================================
@@ -242,7 +257,20 @@ function initSchema() {
     CREATE INDEX IF NOT EXISTS idx_order_items_order ON order_items(order_id);
     CREATE UNIQUE INDEX IF NOT EXISTS idx_fact_sales_order_item ON fact_sales(order_item_id);
     CREATE UNIQUE INDEX IF NOT EXISTS idx_fact_budget_cust_month ON fact_budget_performance(customer_id, month_year);
+    CREATE INDEX IF NOT EXISTS idx_expenses_customer ON expenses(customer_id);
+    CREATE INDEX IF NOT EXISTS idx_expenses_date ON expenses(expense_date);
   `);
+
+  // Migration: Ensure created_at exists on customers table and backfill existing rows
+  try {
+    db.exec(`ALTER TABLE customers ADD COLUMN created_at TEXT;`);
+  } catch (_) {
+    // Column already exists
+  }
+
+  try {
+    db.exec(`UPDATE customers SET created_at = '2024-01-01 00:00:00' WHERE created_at IS NULL;`);
+  } catch (_) {}
 }
 
 module.exports = {

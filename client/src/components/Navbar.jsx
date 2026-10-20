@@ -28,7 +28,8 @@ export default function Navbar({
   cartItemCount,
   setIsCartOpen,
   shoppingListItemCount,
-  budgetStatus
+  budgetStatus,
+  onRequestAdminMode
 }) {
   const isCustomerMode = appMode === 'customer';
 
@@ -241,11 +242,15 @@ export default function Navbar({
             {isCustomerMode ? (
               <button
                 onClick={() => {
-                  setAppMode('admin');
-                  setActiveTab('analytics');
+                  if (onRequestAdminMode) {
+                    onRequestAdminMode();
+                  } else {
+                    setAppMode('admin');
+                    setActiveTab('analytics');
+                  }
                 }}
-                className="flex items-center gap-1.5 bg-slate-100 hover:bg-indigo-50 border border-slate-200 hover:border-indigo-300 text-slate-600 hover:text-indigo-700 px-2.5 py-1.5 rounded-xl text-xs font-medium transition-all"
-                title="Switch to Admin & DWM Analytics view"
+                className="flex items-center gap-1.5 bg-slate-100 hover:bg-indigo-50 border border-slate-200 hover:border-indigo-300 text-slate-600 hover:text-indigo-700 px-2.5 py-1.5 rounded-xl text-xs font-medium transition-all cursor-pointer"
+                title="Switch to Admin & DWM Analytics view (Password Protected)"
               >
                 <BarChart3 className="w-3.5 h-3.5 text-indigo-600" />
                 <span className="hidden lg:inline">Admin Mode</span>
@@ -256,7 +261,7 @@ export default function Navbar({
                   setAppMode('customer');
                   setActiveTab('catalog');
                 }}
-                className="flex items-center gap-1.5 bg-emerald-100 hover:bg-emerald-200 border border-emerald-300 text-emerald-800 px-2.5 py-1.5 rounded-xl text-xs font-bold transition-all"
+                className="flex items-center gap-1.5 bg-emerald-100 hover:bg-emerald-200 border border-emerald-300 text-emerald-800 px-2.5 py-1.5 rounded-xl text-xs font-bold transition-all cursor-pointer"
                 title="Switch back to Customer Store"
               >
                 <Store className="w-3.5 h-3.5 text-emerald-700" />
@@ -266,6 +271,55 @@ export default function Navbar({
           </div>
         </div>
       </div>
+
+      {/* Top Recent Registered Users List (Newest Users Appear First) */}
+      {isCustomerMode && customers && customers.length > 0 && (
+        <div className="bg-slate-50/95 border-t border-slate-200/80 px-4 sm:px-6 lg:px-8 py-1.5 shadow-2xs">
+          <div className="max-w-7xl mx-auto flex items-center gap-2 overflow-x-auto no-scrollbar text-xs">
+            <div className="flex items-center gap-1 text-slate-400 font-bold text-[11px] uppercase tracking-wider shrink-0 mr-1">
+              <Sparkles className="w-3.5 h-3.5 text-emerald-600" />
+              <span>Recent Users:</span>
+            </div>
+            {customers.slice(0, 8).map((c, idx) => {
+              const isActive = activeCustomer?.customer_id === c.customer_id;
+              const isFirst = idx === 0;
+              return (
+                <button
+                  key={c.customer_id}
+                  onClick={() => setActiveCustomer(c)}
+                  className={`flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium transition-all shrink-0 cursor-pointer ${
+                    isActive
+                      ? 'bg-emerald-600 text-white font-bold shadow-xs'
+                      : 'bg-white text-slate-700 hover:bg-emerald-50 hover:text-emerald-800 border border-slate-200'
+                  }`}
+                  title={`Switch to ${c.customer_name} (${c.city || 'Mumbai'})`}
+                >
+                  <span className={`w-4 h-4 rounded-full text-[9px] font-bold flex items-center justify-center ${
+                    isActive ? 'bg-white/20 text-white' : 'bg-slate-100 text-slate-700'
+                  }`}>
+                    {c.customer_name ? c.customer_name[0].toUpperCase() : 'U'}
+                  </span>
+                  <span className="truncate max-w-[110px]">{c.customer_name}</span>
+                  {isFirst && (
+                    <span className={`text-[9px] px-1 py-0.2 rounded font-black uppercase ${
+                      isActive ? 'bg-amber-300 text-slate-900' : 'bg-emerald-100 text-emerald-800 border border-emerald-300'
+                    }`}>
+                      Newest
+                    </span>
+                  )}
+                </button>
+              );
+            })}
+            <button
+              onClick={() => onOpenLoginModal('register')}
+              className="text-[11px] font-bold text-emerald-700 hover:text-emerald-800 hover:underline shrink-0 px-2 flex items-center gap-1 cursor-pointer ml-1"
+            >
+              <UserPlus className="w-3.5 h-3.5" />
+              <span>+ Add User</span>
+            </button>
+          </div>
+        </div>
+      )}
 
       {/* Mobile Bottom Navigation bar */}
       <div className="md:hidden flex items-center justify-around border-t border-slate-200 bg-white py-2 px-1 text-xs font-medium">

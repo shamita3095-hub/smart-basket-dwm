@@ -110,17 +110,120 @@ export async function fetchCustomerOrders(customerId) {
 }
 
 export async function runETLPipeline(incremental = false) {
+  const token = getAdminToken();
+  const headers = { 'Content-Type': 'application/json' };
+  if (token) headers.Authorization = `Bearer ${token}`;
   const res = await fetch(`${API_BASE}/etl/run`, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers,
     body: JSON.stringify({ incremental })
   });
   return res.json();
 }
 
 export async function fetchETLHistory() {
-  const res = await fetch(`${API_BASE}/etl/history`);
+  const token = getAdminToken();
+  const headers = {};
+  if (token) headers.Authorization = `Bearer ${token}`;
+  const res = await fetch(`${API_BASE}/etl/history`, { headers });
   return res.json();
+}
+
+// ============================================================================
+// ADMIN AUTHENTICATION API
+// ============================================================================
+
+export function getAdminToken() {
+  return sessionStorage.getItem('smartbasket_admin_token') || localStorage.getItem('smartbasket_admin_token') || '';
+}
+
+export function setAdminToken(token) {
+  if (token) {
+    sessionStorage.setItem('smartbasket_admin_token', token);
+  } else {
+    sessionStorage.removeItem('smartbasket_admin_token');
+    localStorage.removeItem('smartbasket_admin_token');
+  }
+}
+
+export async function adminLogin(password) {
+  const res = await fetch(`${API_BASE}/auth/admin-login`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ password })
+  });
+  const data = await res.json();
+  if (!res.ok) {
+    throw new Error(data.error || 'Admin authentication failed');
+  }
+  if (data.token) {
+    setAdminToken(data.token);
+  }
+  return data;
+}
+
+export async function verifyAdminToken(token) {
+  const t = token || getAdminToken();
+  if (!t) return false;
+  try {
+    const res = await fetch(`${API_BASE}/auth/verify-admin`, {
+      headers: { Authorization: `Bearer ${t}` }
+    });
+    return res.ok;
+  } catch {
+    return false;
+  }
+}
+
+export function logoutAdmin() {
+  setAdminToken(null);
+}
+
+// ============================================================================
+// EXPENSE MANAGEMENT CRUD API
+// ============================================================================
+
+export async function fetchExpenses(customerId, monthYear) {
+  const params = monthYear ? `?monthYear=${monthYear}` : '';
+  const res = await fetch(`${API_BASE}/expenses/${customerId}${params}`);
+  return res.json();
+}
+
+export async function createExpense(expenseData) {
+  const res = await fetch(`${API_BASE}/expenses`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(expenseData)
+  });
+  const data = await res.json();
+  if (!res.ok) {
+    throw new Error(data.error || 'Failed to save expense');
+  }
+  return data;
+}
+
+export async function updateExpense(expenseId, expenseData) {
+  const res = await fetch(`${API_BASE}/expenses/${expenseId}`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(expenseData)
+  });
+  const data = await res.json();
+  if (!res.ok) {
+    throw new Error(data.error || 'Failed to update expense');
+  }
+  return data;
+}
+
+export async function deleteExpense(expenseId) {
+  const res = await fetch(`${API_BASE}/expenses/${expenseId}`, {
+    method: 'DELETE'
+  });
+  const data = await res.json();
+  if (!res.ok) {
+    throw new Error(data.error || 'Failed to delete expense');
+  }
+  return data;
 }
 
 export async function fetchKPIs() {
