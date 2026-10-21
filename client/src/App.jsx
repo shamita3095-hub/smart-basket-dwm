@@ -115,10 +115,11 @@ export default function App() {
     }
   };
 
-  const handleSelectCustomer = (customer) => {
+  const handleSelectCustomer = async (customer) => {
     setActiveCustomer(customer);
     if (customer?.customer_id) {
       localStorage.setItem('smartbasket_customer_id', customer.customer_id);
+      await loadCustomerData(customer.customer_id);
     }
   };
 
@@ -247,24 +248,24 @@ export default function App() {
     if (!activeCustomer) return;
     await createExpense(expenseData);
     const my = budgetStatus?.monthYear || new Date().toISOString().substring(0, 7);
-    const updated = await fetchBudget(activeCustomer.customer_id, my);
-    setBudgetStatus(updated);
+    await loadCustomerData(activeCustomer.customer_id, my);
+    fetchCustomers().then(data => setCustomers(data || [])).catch(() => {});
   };
 
   const handleUpdateExpense = async (expenseId, expenseData) => {
     if (!activeCustomer) return;
     await updateExpense(expenseId, expenseData);
     const my = budgetStatus?.monthYear || new Date().toISOString().substring(0, 7);
-    const updated = await fetchBudget(activeCustomer.customer_id, my);
-    setBudgetStatus(updated);
+    await loadCustomerData(activeCustomer.customer_id, my);
+    fetchCustomers().then(data => setCustomers(data || [])).catch(() => {});
   };
 
   const handleDeleteExpense = async (expenseId) => {
     if (!activeCustomer) return;
     await deleteExpense(expenseId);
     const my = budgetStatus?.monthYear || new Date().toISOString().substring(0, 7);
-    const updated = await fetchBudget(activeCustomer.customer_id, my);
-    setBudgetStatus(updated);
+    await loadCustomerData(activeCustomer.customer_id, my);
+    fetchCustomers().then(data => setCustomers(data || [])).catch(() => {});
   };
 
   // Admin Mode Handlers
@@ -289,15 +290,25 @@ export default function App() {
   // Checkout Handler
   const handleCheckoutComplete = async (orderPayload) => {
     const res = await checkoutOrder(orderPayload);
-    const targetCustId = orderPayload.customerId || activeCustomer?.customer_id;
+    const targetCustId = res.order?.customer_id || orderPayload.customerId || activeCustomer?.customer_id;
+    const currentMonth = new Date().toISOString().substring(0, 7);
     if (targetCustId) {
-      await loadCustomerData(targetCustId);
-      if (!activeCustomer || activeCustomer.customer_id !== targetCustId) {
+      if (orderPayload.customer) {
+        setCustomers(prev => {
+          if (prev.some(c => c.customer_id === orderPayload.customer.customer_id)) return prev;
+          return [orderPayload.customer, ...prev];
+        });
+        handleSelectCustomer(orderPayload.customer);
+      } else {
         const found = customers.find(c => c.customer_id === targetCustId);
-        if (found) {
+        if (found && (!activeCustomer || activeCustomer.customer_id !== targetCustId)) {
           handleSelectCustomer(found);
         }
       }
+      // Re-fetch customer list to update budget statuses in CustomerLoginModal
+      fetchCustomers().then(data => setCustomers(data || [])).catch(() => {});
+      // Immediately reload customer data for currentMonth
+      await loadCustomerData(targetCustId, currentMonth);
     }
     return res;
   };
@@ -341,6 +352,10 @@ export default function App() {
                 setSearchQuery={setSearchQuery}
                 onAddToCart={handleAddToCart}
                 onAddToList={handleAddToList}
+                onBuyNow={(prod) => {
+                  handleAddToCart(prod);
+                  setIsCartOpen(true);
+                }}
                 shoppingListProductIds={shoppingListProductIds}
                 activeCustomer={activeCustomer}
                 budgetStatus={budgetStatus}
@@ -399,9 +414,14 @@ export default function App() {
         appMode={appMode}
         onRegisterCustomer={handleCustomerCreated}
         onOpenLoginModal={handleOpenLoginModal}
-        onNavigateToBudget={() => {
+        onNavigateToBudget={async () => {
           setIsCartOpen(false);
           setActiveTab('budget');
+          const currentMonth = new Date().toISOString().substring(0, 7);
+          const targetId = activeCustomer?.customer_id;
+          if (targetId) {
+            await loadCustomerData(targetId, currentMonth);
+          }
         }}
       />
 

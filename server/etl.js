@@ -163,7 +163,7 @@ function runETL(options = { incremental: false }) {
       }
     }
 
-    // Ensure dates for any calendar months present in Budgets are also populated in Dim_Date
+    // Ensure dates for any calendar months present in Budgets and Expenses are also populated in Dim_Date
     try {
       const budgetMonths = db.prepare('SELECT DISTINCT month_year FROM budgets WHERE month_year IS NOT NULL').all();
       for (const bm of budgetMonths) {
@@ -183,6 +183,24 @@ function runETL(options = { incremental: false }) {
               dInfo.dayOfWeek
             );
           }
+        }
+      }
+
+      const expenseDates = db.prepare('SELECT DISTINCT expense_date FROM expenses WHERE expense_date IS NOT NULL').all();
+      for (const ed of expenseDates) {
+        if (ed.expense_date && !dateMap.has(ed.expense_date)) {
+          const dInfo = parseDateString(ed.expense_date);
+          dateMap.set(ed.expense_date, dInfo);
+          insertDateStmt.run(
+            dInfo.dateId,
+            dInfo.fullDate,
+            dInfo.day,
+            dInfo.month,
+            dInfo.monthName,
+            dInfo.quarter,
+            dInfo.year,
+            dInfo.dayOfWeek
+          );
         }
       }
     } catch (_) {}
@@ -247,40 +265,59 @@ function runETL(options = { incremental: false }) {
     // ----------------------------------------------------
     // STEP 5: TRANSFORM & LOAD FACT_BUDGET_PERFORMANCE
     // ----------------------------------------------------
-    // Aggregate customer spending by month, compare against monthly_budget, compute variance & status
-    // Supports all customers including newly registered shoppers with zero or active spending
+    // Aggregate customer spending by month from both Store Orders and Manual Expenses,
+    // compare against monthly_budget, compute variance, utilization rate, and status.
     const budgetFactsStmt = db.prepare(`
-      WITH CustomerSpending AS (
+      WITH CustomerOrdersSpending AS (
         SELECT 
           fs.customer_id,
           SUBSTR(d.full_date, 1, 7) AS month_year,
           MIN(d.date_id) AS date_id,
-          SUM(fs.total_amount) AS actual_spent
+          SUM(fs.total_amount) AS orders_spent
         FROM fact_sales fs
         JOIN dim_date d ON fs.date_id = d.date_id
         GROUP BY fs.customer_id, SUBSTR(d.full_date, 1, 7)
       ),
+      CustomerExpensesSpending AS (
+        SELECT 
+          customer_id,
+          CASE 
+            WHEN expense_date LIKE '____-__-__' THEN SUBSTR(expense_date, 1, 7)
+            WHEN expense_date LIKE '__-__-____' THEN SUBSTR(expense_date, 7, 4) || '-' || SUBSTR(expense_date, 4, 2)
+            ELSE SUBSTR(expense_date, 1, 7)
+          END AS month_year,
+          SUM(amount) AS expenses_spent
+        FROM expenses
+        GROUP BY customer_id, month_year
+      ),
       AllCustomerMonths AS (
-        SELECT customer_id, month_year FROM CustomerSpending
+        SELECT customer_id, month_year FROM CustomerOrdersSpending
+        UNION
+        SELECT customer_id, month_year FROM CustomerExpensesSpending
         UNION
         SELECT customer_id, month_year FROM budgets
         UNION
         SELECT customer_id, SUBSTR(visit_date, 1, 7) AS month_year FROM orders WHERE visit_date LIKE '____-__-__'
         UNION
         SELECT customer_id, SUBSTR(visit_date, 7, 4) || '-' || SUBSTR(visit_date, 4, 2) AS month_year FROM orders WHERE visit_date LIKE '__-__-____'
+        UNION
+        SELECT customer_id, SUBSTR(expense_date, 1, 7) AS month_year FROM expenses WHERE expense_date LIKE '____-__-__'
+        UNION
+        SELECT customer_id, SUBSTR(expense_date, 7, 4) || '-' || SUBSTR(expense_date, 4, 2) AS month_year FROM expenses WHERE expense_date LIKE '__-__-____'
       )
       SELECT 
         acm.customer_id,
         COALESCE(
-          cs.date_id,
+          cos.date_id,
           (SELECT MIN(date_id) FROM dim_date WHERE full_date LIKE acm.month_year || '%'),
           CAST(REPLACE(acm.month_year || '-01', '-', '') AS INTEGER)
         ) AS date_id,
         acm.month_year,
         COALESCE(b.monthly_budget, (SELECT monthly_budget FROM budgets WHERE customer_id = acm.customer_id ORDER BY month_year DESC LIMIT 1), 10000.0) AS monthly_budget,
-        COALESCE(cs.actual_spent, 0.0) AS actual_spent
+        ROUND(COALESCE(cos.orders_spent, 0.0) + COALESCE(ces.expenses_spent, 0.0), 2) AS actual_spent
       FROM AllCustomerMonths acm
-      LEFT JOIN CustomerSpending cs ON acm.customer_id = cs.customer_id AND acm.month_year = cs.month_year
+      LEFT JOIN CustomerOrdersSpending cos ON acm.customer_id = cos.customer_id AND acm.month_year = cos.month_year
+      LEFT JOIN CustomerExpensesSpending ces ON acm.customer_id = ces.customer_id AND acm.month_year = ces.month_year
       LEFT JOIN budgets b ON acm.customer_id = b.customer_id AND acm.month_year = b.month_year
       WHERE acm.customer_id IS NOT NULL AND acm.month_year IS NOT NULL AND acm.month_year != ''
     `);
@@ -297,13 +334,15 @@ function runETL(options = { incremental: false }) {
 
     let budgetFactsLoadedCount = 0;
     for (const b of budgetActuals) {
-      const variance = b.actual_spent - b.monthly_budget;
-      const rate = b.monthly_budget > 0 ? (b.actual_spent / b.monthly_budget) * 100 : 100;
+      const variance = parseFloat((b.actual_spent - b.monthly_budget).toFixed(2));
+      const rate = b.monthly_budget > 0 ? parseFloat(((b.actual_spent / b.monthly_budget) * 100).toFixed(1)) : 100;
       let status = 'UNDER_BUDGET';
-      if (rate > 100) {
+      if (b.actual_spent > b.monthly_budget) {
         status = 'OVER_BUDGET';
-      } else if (rate >= 80) {
-        status = 'NEAR_LIMIT';
+      } else if (b.actual_spent === b.monthly_budget || (rate >= 80 && rate <= 100)) {
+        status = 'ON_BUDGET';
+      } else {
+        status = 'UNDER_BUDGET';
       }
 
       insertBudgetFactStmt.run(

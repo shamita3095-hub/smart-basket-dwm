@@ -30,6 +30,7 @@ export default function CustomerLoginModal({
 }) {
   const [activeTab, setActiveTab] = useState(initialTab); // 'signin' or 'register'
   const [search, setSearch] = useState('');
+  const [statusFilter, setStatusFilter] = useState('ALL'); // 'ALL', 'OVER_BUDGET', 'ON_BUDGET', 'UNDER_BUDGET'
 
   useEffect(() => {
     if (isOpen) {
@@ -50,30 +51,94 @@ export default function CustomerLoginModal({
   const [errorMsg, setErrorMsg] = useState('');
   const [successNotice, setSuccessNotice] = useState('');
 
-  // Recent customer profiles with newly registered users appearing first
-  const featuredProfiles = useMemo(() => {
-    if (!customers || customers.length === 0) return [];
-    return [...customers].slice(0, 6);
+  // Count customers across all budget types
+  const statusCounts = useMemo(() => {
+    const counts = { ALL: customers.length, OVER_BUDGET: 0, ON_BUDGET: 0, UNDER_BUDGET: 0 };
+    customers.forEach(c => {
+      const st = c.status || 'UNDER_BUDGET';
+      counts[st] = (counts[st] || 0) + 1;
+    });
+    return counts;
   }, [customers]);
 
-  // Filtered customer list for full search
+  // Multi-type featured profiles showcasing all budget statuses (New, Over Budget, On Budget, Under Budget)
+  const featuredProfiles = useMemo(() => {
+    if (!customers || customers.length === 0) return [];
+    const seen = new Set();
+    const result = [];
+    const addCust = (c) => {
+      if (c && !seen.has(c.customer_id)) {
+        seen.add(c.customer_id);
+        result.push(c);
+      }
+    };
+
+    // 1. Newly registered shoppers
+    customers.filter(c => c.segment === 'New Shopper' || (c.created_at && String(c.customer_id).startsWith('CUST_17'))).slice(0, 2).forEach(addCust);
+
+    // 2. Over Budget shoppers (spent > budget)
+    customers.filter(c => c.status === 'OVER_BUDGET').slice(0, 2).forEach(addCust);
+
+    // 3. On Budget shoppers (80% - 100% utilized)
+    customers.filter(c => c.status === 'ON_BUDGET').slice(0, 2).forEach(addCust);
+
+    // 4. Under Budget shoppers (< 80% utilized)
+    customers.filter(c => c.status === 'UNDER_BUDGET').slice(0, 2).forEach(addCust);
+
+    // Fill up to 6 if needed
+    for (const c of customers) {
+      if (result.length >= 6) break;
+      addCust(c);
+    }
+    return result;
+  }, [customers]);
+
+  // Filtered customer list for full search and budget status tab
   const filteredCustomers = useMemo(() => {
-    if (!search.trim()) return customers.slice(0, 30);
+    let list = customers;
+    if (statusFilter !== 'ALL') {
+      list = list.filter(c => (c.status || 'UNDER_BUDGET') === statusFilter);
+    }
+    if (!search.trim()) return list.slice(0, 40);
     const q = search.toLowerCase();
-    return customers
+    return list
       .filter(c =>
         c.customer_name?.toLowerCase().includes(q) ||
         c.city?.toLowerCase().includes(q) ||
-        c.customer_id?.toLowerCase().includes(q)
+        c.customer_id?.toLowerCase().includes(q) ||
+        (c.status || '').toLowerCase().includes(q)
       )
-      .slice(0, 40);
-  }, [customers, search]);
+      .slice(0, 50);
+  }, [customers, search, statusFilter]);
 
   if (!isOpen) return null;
 
   const handleConfirmLogin = (customer) => {
     onSelectCustomer(customer);
     onClose();
+  };
+
+  const getStatusBadge = (status, utilization) => {
+    const util = Number(utilization || 0).toFixed(0);
+    if (status === 'OVER_BUDGET') {
+      return {
+        label: `OVER BUDGET (${util}%)`,
+        tag: 'OVER_BUDGET',
+        color: 'bg-rose-100 text-rose-800 border-rose-300'
+      };
+    }
+    if (status === 'ON_BUDGET') {
+      return {
+        label: `ON BUDGET (${util}%)`,
+        tag: 'ON_BUDGET',
+        color: 'bg-amber-100 text-amber-900 border-amber-300'
+      };
+    }
+    return {
+      label: `UNDER BUDGET (${util}%)`,
+      tag: 'UNDER_BUDGET',
+      color: 'bg-emerald-100 text-emerald-800 border-emerald-300'
+    };
   };
 
   const handleRegisterNewCustomer = async (e) => {
@@ -221,12 +286,12 @@ export default function CustomerLoginModal({
               </div>
             )}
 
-            {/* Quick Select Recent Registered Shoppers */}
+            {/* Quick Select Diverse Customer Profiles (Over Budget, On Budget, Under Budget) */}
             <div>
               <div className="flex items-center justify-between mb-2.5">
                 <label className="text-xs font-bold uppercase tracking-wider text-slate-500 flex items-center gap-1.5">
                   <Sparkles className="w-3.5 h-3.5 text-emerald-600" />
-                  <span>Recent Registered Shoppers (Newest First)</span>
+                  <span>Featured Customer Profiles (All Budget Types)</span>
                 </label>
                 <button
                   onClick={() => setActiveTab('register')}
@@ -237,18 +302,14 @@ export default function CustomerLoginModal({
               </div>
 
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                {featuredProfiles.map((cust, idx) => {
+                {featuredProfiles.map((cust) => {
                   const isSelected = activeCustomer?.customer_id === cust.customer_id;
-                  const badge = idx === 0
-                    ? { label: '✦ Newest Registered', color: 'bg-emerald-100 text-emerald-800 border-emerald-300' }
-                    : cust.segment === 'New Shopper'
-                    ? { label: 'New Shopper', color: 'bg-teal-100 text-teal-800 border-teal-200' }
-                    : getPersonaBadge(idx);
+                  const badge = getStatusBadge(cust.status, cust.utilization_rate);
                   return (
                     <button
                       key={cust.customer_id}
                       onClick={() => handleConfirmLogin(cust)}
-                      className={`text-left p-3.5 rounded-2xl border transition-all flex items-start gap-3 group ${
+                      className={`text-left p-3.5 rounded-2xl border transition-all flex items-start gap-3 group cursor-pointer ${
                         isSelected
                           ? 'border-emerald-500 bg-emerald-50/70 shadow-sm ring-1 ring-emerald-500/50'
                           : 'border-slate-200 hover:border-emerald-300 hover:bg-slate-50/80 shadow-xs'
@@ -272,9 +333,12 @@ export default function CustomerLoginModal({
                           <span>•</span>
                           <span className="font-mono text-[10px] text-slate-400">{cust.customer_id}</span>
                         </div>
-                        <div className="mt-2 flex items-center gap-2">
-                          <span className={`text-[10px] font-semibold px-2 py-0.5 rounded-md border ${badge.color}`}>
+                        <div className="mt-2 flex items-center justify-between gap-1 flex-wrap">
+                          <span className={`text-[10px] font-bold px-2 py-0.5 rounded-md border ${badge.color}`}>
                             {badge.label}
+                          </span>
+                          <span className="text-[10px] text-slate-500 font-bold">
+                            ₹{Number(cust.current_spent || 0).toLocaleString('en-IN', { maximumFractionDigits: 0 })} / ₹{Number(cust.monthly_budget || 10000).toLocaleString('en-IN', { maximumFractionDigits: 0 })}
                           </span>
                         </div>
                       </div>
@@ -287,9 +351,60 @@ export default function CustomerLoginModal({
             <div className="relative flex py-1 items-center">
               <div className="flex-grow border-t border-slate-200"></div>
               <span className="flex-shrink mx-4 text-xs font-semibold text-slate-400 uppercase tracking-wider">
-                Or Search All Customers
+                Or Browse All Customer Profiles
               </span>
               <div className="flex-grow border-t border-slate-200"></div>
+            </div>
+
+            {/* Status Filter Tabs */}
+            <div className="flex items-center gap-1.5 overflow-x-auto pb-1 text-xs">
+              <button
+                type="button"
+                onClick={() => setStatusFilter('ALL')}
+                className={`px-2.5 py-1 rounded-xl font-bold border transition-all cursor-pointer ${
+                  statusFilter === 'ALL'
+                    ? 'bg-slate-900 text-white border-slate-900'
+                    : 'bg-white text-slate-600 border-slate-200 hover:bg-slate-50'
+                }`}
+              >
+                All ({statusCounts.ALL})
+              </button>
+              <button
+                type="button"
+                onClick={() => setStatusFilter('OVER_BUDGET')}
+                className={`px-2.5 py-1 rounded-xl font-bold border transition-all flex items-center gap-1 cursor-pointer ${
+                  statusFilter === 'OVER_BUDGET'
+                    ? 'bg-rose-600 text-white border-rose-600'
+                    : 'bg-rose-50 text-rose-700 border-rose-200 hover:bg-rose-100'
+                }`}
+              >
+                <span>🔴 Over Budget</span>
+                <span className="text-[10px] font-black">({statusCounts.OVER_BUDGET})</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => setStatusFilter('ON_BUDGET')}
+                className={`px-2.5 py-1 rounded-xl font-bold border transition-all flex items-center gap-1 cursor-pointer ${
+                  statusFilter === 'ON_BUDGET'
+                    ? 'bg-amber-600 text-white border-amber-600'
+                    : 'bg-amber-50 text-amber-800 border-amber-200 hover:bg-amber-100'
+                }`}
+              >
+                <span>🟡 On Budget</span>
+                <span className="text-[10px] font-black">({statusCounts.ON_BUDGET})</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => setStatusFilter('UNDER_BUDGET')}
+                className={`px-2.5 py-1 rounded-xl font-bold border transition-all flex items-center gap-1 cursor-pointer ${
+                  statusFilter === 'UNDER_BUDGET'
+                    ? 'bg-emerald-600 text-white border-emerald-600'
+                    : 'bg-emerald-50 text-emerald-800 border-emerald-200 hover:bg-emerald-100'
+                }`}
+              >
+                <span>🟢 Under Budget</span>
+                <span className="text-[10px] font-black">({statusCounts.UNDER_BUDGET})</span>
+              </button>
             </div>
 
             {/* Search Box */}
@@ -306,7 +421,7 @@ export default function CustomerLoginModal({
                 {search && (
                   <button
                     onClick={() => setSearch('')}
-                    className="absolute right-3 top-1/2 -translate-y-1/2 text-xs text-slate-400 hover:text-slate-600"
+                    className="absolute right-3 top-1/2 -translate-y-1/2 text-xs text-slate-400 hover:text-slate-600 cursor-pointer"
                   >
                     Clear
                   </button>
@@ -314,14 +429,15 @@ export default function CustomerLoginModal({
               </div>
 
               {/* Scrollable Customer List */}
-              <div className="max-h-52 overflow-y-auto border border-slate-200 rounded-2xl divide-y divide-slate-100 bg-white">
+              <div className="max-h-56 overflow-y-auto border border-slate-200 rounded-2xl divide-y divide-slate-100 bg-white">
                 {filteredCustomers.length === 0 ? (
                   <div className="p-6 text-center text-xs text-slate-500">
-                    No customers found matching "{search}".
+                    No customers found matching your filter criteria.
                   </div>
                 ) : (
                   filteredCustomers.map((cust) => {
                     const isCurrent = activeCustomer?.customer_id === cust.customer_id;
+                    const badge = getStatusBadge(cust.status, cust.utilization_rate);
                     return (
                       <div
                         key={cust.customer_id}
@@ -330,20 +446,33 @@ export default function CustomerLoginModal({
                           isCurrent ? 'bg-emerald-50/80' : ''
                         }`}
                       >
-                        <div className="flex items-center gap-3">
-                          <div className="w-8 h-8 rounded-full bg-slate-100 text-slate-700 font-semibold text-xs flex items-center justify-center border border-slate-200">
+                        <div className="flex items-center gap-3 min-w-0">
+                          <div className="w-8 h-8 rounded-full bg-slate-100 text-slate-700 font-semibold text-xs flex items-center justify-center border border-slate-200 shrink-0">
                             {getAvatarInitials(cust.customer_name)}
                           </div>
-                          <div>
-                            <p className="text-xs font-bold text-slate-800">{cust.customer_name}</p>
-                            <p className="text-[11px] text-slate-500">
-                              {cust.city} <span className="text-slate-300">•</span> {cust.email || `${cust.customer_id.toLowerCase()}@smartbasket.in`}
+                          <div className="min-w-0">
+                            <div className="flex items-center gap-2 flex-wrap">
+                              <p className="text-xs font-bold text-slate-800">{cust.customer_name}</p>
+                              <span className={`text-[9px] font-bold px-1.5 py-0.2 rounded-full border ${badge.color}`}>
+                                {cust.status || 'UNDER_BUDGET'}
+                              </span>
+                              {isCurrent && (
+                                <span className="text-[9px] bg-emerald-200 text-emerald-900 font-bold px-1.5 py-0.2 rounded-full">
+                                  Current
+                                </span>
+                              )}
+                            </div>
+                            <p className="text-[11px] text-slate-500 flex items-center gap-1.5 mt-0.5">
+                              <span>{cust.city}</span>
+                              <span className="text-slate-300">•</span>
+                              <span className="font-mono text-[10px] text-slate-400">{cust.customer_id}</span>
+                              <span className="text-slate-300">•</span>
+                              <span className="font-semibold text-slate-700">Spent: ₹{Number(cust.current_spent || 0).toLocaleString('en-IN', { maximumFractionDigits: 0 })} / ₹{Number(cust.monthly_budget || 10000).toLocaleString('en-IN', { maximumFractionDigits: 0 })}</span>
                             </p>
                           </div>
                         </div>
-                        <div className="flex items-center gap-2">
-                          <span className="font-mono text-[10px] text-slate-400">{cust.customer_id}</span>
-                          <button className="px-2.5 py-1 rounded-lg bg-emerald-600 text-white text-[11px] font-semibold hover:bg-emerald-700 flex items-center gap-1 transition-colors">
+                        <div className="flex items-center gap-2 shrink-0 ml-2">
+                          <button className="px-2.5 py-1 rounded-lg bg-emerald-600 text-white text-[11px] font-semibold hover:bg-emerald-700 flex items-center gap-1 transition-colors cursor-pointer">
                             <span>Select</span>
                             <ArrowRight className="w-3 h-3" />
                           </button>

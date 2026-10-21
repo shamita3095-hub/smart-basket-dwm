@@ -24,6 +24,7 @@ export default function StoreCatalog({
   setSearchQuery,
   onAddToCart,
   onAddToList,
+  onBuyNow,
   shoppingListProductIds = new Set(),
   activeCustomer,
   budgetStatus,
@@ -396,6 +397,23 @@ export default function StoreCatalog({
                         <span>Add to Cart</span>
                       </button>
                     </div>
+
+                    {/* Instant Buy Now from Shop */}
+                    <button
+                      onClick={() => {
+                        if (onBuyNow) {
+                          onBuyNow(product);
+                        } else {
+                          onAddToCart(product);
+                          if (onOpenCart) onOpenCart();
+                        }
+                      }}
+                      className="mt-2 w-full flex items-center justify-center gap-1.5 px-2.5 py-1.5 rounded-xl text-xs font-bold bg-slate-900 hover:bg-slate-800 text-white transition-all shadow-xs cursor-pointer"
+                      title="Buy now and proceed to checkout"
+                    >
+                      <ShoppingBag className="w-3.5 h-3.5 text-emerald-400" />
+                      <span>Buy Now</span>
+                    </button>
                   </div>
                 </div>
               </div>

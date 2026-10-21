@@ -620,10 +620,10 @@ export default function BudgetPlanner({
                       <td className="py-2.5 px-3 text-center">
                         <span className={`text-[10px] font-extrabold px-2 py-0.5 rounded-full uppercase ${
                           row.status === 'OVER_BUDGET'
-                            ? 'bg-rose-100 text-rose-700 border border-rose-200'
-                            : row.status === 'NEAR_LIMIT'
-                            ? 'bg-amber-100 text-amber-800 border border-amber-200'
-                            : 'bg-emerald-100 text-emerald-800 border border-emerald-200'
+                            ? 'bg-rose-100 text-rose-700 border border-rose-300'
+                            : (row.status === 'ON_BUDGET' || row.status === 'NEAR_LIMIT')
+                            ? 'bg-amber-100 text-amber-800 border border-amber-300'
+                            : 'bg-emerald-100 text-emerald-800 border border-emerald-300'
                         }`}>
                           {row.status}
                         </span>
@@ -677,7 +677,13 @@ export default function BudgetPlanner({
                     </div>
                     <div className="text-slate-500 text-[11px] mt-0.5">
                       {ord.visit_date} • {ord.store_type || 'Retail Outlet'} ({ord.city || activeCustomer?.city || 'City'}) • Paid via {ord.payment_method || 'UPI'}
+                      {ord.items_count ? ` • ${ord.items_count} ${ord.items_count === 1 ? 'item' : 'items'}` : ''}
                     </div>
+                    {ord.items_summary && (
+                      <div className="text-slate-400 text-[10px] truncate max-w-md mt-0.5" title={ord.items_summary}>
+                        {ord.items_summary}
+                      </div>
+                    )}
                   </div>
                   <div className="text-right">
                     <div className="font-black text-slate-900 text-sm">₹{Number(ord.total_amount).toFixed(2)}</div>

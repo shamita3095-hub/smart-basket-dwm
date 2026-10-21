@@ -81,6 +81,13 @@ export default function CartCheckoutModal({
     }
   }, [cartItems.length]);
 
+  // Auto-reset orderSuccess when modal closes
+  useEffect(() => {
+    if (!isOpen) {
+      setOrderSuccess(null);
+    }
+  }, [isOpen]);
+
   if (!isOpen) return null;
 
   const handleCheckout = async (e) => {
@@ -107,8 +114,11 @@ export default function CartCheckoutModal({
         }
       }
 
+      const clientOrderId = `ORD_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
       const payload = {
+        orderId: clientOrderId,
         customerId: customerToUse.customer_id,
+        customer: customerToUse,
         storeId: selectedStore || (stores[0]?.store_id || 'STORE_500'),
         items: cartItems.map(i => ({
           productId: i.product_id,

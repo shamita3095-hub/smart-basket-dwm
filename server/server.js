@@ -155,9 +155,10 @@ app.get('/api/stores', (req, res) => {
   }
 });
 
-// Get customers for user switching / demo
+// Get customers for user switching / demo with their real warehouse budget status
 app.get('/api/customers', (req, res) => {
   try {
+    const currentMonth = new Date().toISOString().substring(0, 7);
     const customers = db.prepare(`
       SELECT 
         c.customer_id, 
@@ -165,19 +166,33 @@ app.get('/api/customers', (req, res) => {
         c.email, 
         c.city, 
         c.created_at,
-        b.monthly_budget, 
-        dc.segment
+        dc.segment,
+        COALESCE(fbp.monthly_budget, b.monthly_budget, 10000) AS monthly_budget,
+        COALESCE(fbp.actual_spent, 0) AS current_spent,
+        COALESCE(fbp.variance_amount, 0 - COALESCE(b.monthly_budget, 10000)) AS variance_amount,
+        COALESCE(fbp.utilization_rate, 0) AS utilization_rate,
+        COALESCE(fbp.status, 'UNDER_BUDGET') AS status,
+        fbp.month_year AS status_month
       FROM customers c
+      LEFT JOIN dim_customer dc ON c.customer_id = dc.customer_id
       LEFT JOIN (
         SELECT customer_id, monthly_budget 
         FROM budgets 
         GROUP BY customer_id
       ) b ON c.customer_id = b.customer_id
-      LEFT JOIN dim_customer dc ON c.customer_id = dc.customer_id
-      GROUP BY c.customer_id
+      LEFT JOIN fact_budget_performance fbp ON c.customer_id = fbp.customer_id
+        AND fbp.budget_fact_id = (
+          SELECT f2.budget_fact_id 
+          FROM fact_budget_performance f2 
+          WHERE f2.customer_id = c.customer_id 
+          ORDER BY 
+            CASE WHEN f2.month_year = ? THEN 1 ELSE 0 END DESC,
+            f2.month_year DESC 
+          LIMIT 1
+        )
       ORDER BY COALESCE(c.created_at, '') DESC, c.customer_id DESC
-      LIMIT 100
-    `).all();
+      LIMIT 300
+    `).all(currentMonth);
     res.json(customers);
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -410,6 +425,11 @@ app.post('/api/shopping-list/clear', (req, res) => {
 
 // Reusable Helper: Consolidate Orders & Expenses, and Sync Warehouse Fact_Budget_Performance
 function syncFactBudgetPerformance(customerId, monthYear) {
+  if (!monthYear || typeof monthYear !== 'string' || !monthYear.includes('-')) {
+    const d = new Date();
+    const mm = String(d.getMonth() + 1).padStart(2, '0');
+    monthYear = `${d.getFullYear()}-${mm}`;
+  }
   const [yr, mo] = monthYear.split('-');
 
   // 1. Get or create configured budget for this customer and month
@@ -457,16 +477,32 @@ function syncFactBudgetPerformance(customerId, monthYear) {
 
   const totalSpent = ordersSpent + expensesSpent;
   const remainingBalance = monthlyBudget - totalSpent;
+  const varianceAmount = totalSpent - monthlyBudget;
   const percentageUsed = monthlyBudget > 0 ? (totalSpent / monthlyBudget) * 100 : 0;
-  const isExceeded = percentageUsed > 100;
-  const isNearLimit = percentageUsed >= 80 && percentageUsed <= 100;
+  const utilizationRate = parseFloat(percentageUsed.toFixed(1));
+  const isExceeded = totalSpent > monthlyBudget;
+  const isNearLimit = !isExceeded && percentageUsed >= 80;
 
   let status = 'UNDER_BUDGET';
-  if (isExceeded) status = 'OVER_BUDGET';
-  else if (isNearLimit) status = 'NEAR_LIMIT';
+  if (isExceeded) {
+    status = 'OVER_BUDGET';
+  } else if (totalSpent === monthlyBudget || (percentageUsed >= 80 && percentageUsed <= 100)) {
+    status = 'ON_BUDGET';
+  } else {
+    status = 'UNDER_BUDGET';
+  }
 
   // 4. Update Fact_Budget_Performance in analytical layer
   try {
+    // Ensure dim_customer exists to satisfy foreign key constraints
+    const custRow = db.prepare('SELECT customer_name, city FROM customers WHERE customer_id = ?').get(customerId);
+    if (custRow) {
+      db.prepare(`
+        INSERT OR IGNORE INTO dim_customer (customer_id, customer_name, city, segment)
+        VALUES (?, ?, ?, 'New Shopper')
+      `).run(customerId, custRow.customer_name, custRow.city || 'Mumbai');
+    }
+
     const dInfo = parseDateString(`${monthYear}-01`);
     db.prepare(`
       INSERT OR IGNORE INTO dim_date (date_id, full_date, day, month, month_name, quarter, year, day_of_week)
@@ -482,13 +518,13 @@ function syncFactBudgetPerformance(customerId, monthYear) {
         UPDATE fact_budget_performance
         SET monthly_budget = ?, actual_spent = ?, variance_amount = ?, utilization_rate = ?, status = ?
         WHERE budget_fact_id = ?
-      `).run(monthlyBudget, totalSpent, totalSpent - monthlyBudget, parseFloat(percentageUsed.toFixed(1)), status, existingFact.budget_fact_id);
+      `).run(monthlyBudget, totalSpent, varianceAmount, utilizationRate, status, existingFact.budget_fact_id);
     } else {
       db.prepare(`
         INSERT INTO fact_budget_performance (
           customer_id, date_id, month_year, monthly_budget, actual_spent, variance_amount, utilization_rate, status
         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-      `).run(customerId, dInfo.dateId, monthYear, monthlyBudget, totalSpent, totalSpent - monthlyBudget, parseFloat(percentageUsed.toFixed(1)), status);
+      `).run(customerId, dInfo.dateId, monthYear, monthlyBudget, totalSpent, varianceAmount, utilizationRate, status);
     }
   } catch (syncErr) {
     console.warn('Fact sync notice in syncFactBudgetPerformance:', syncErr.message);
@@ -500,6 +536,8 @@ function syncFactBudgetPerformance(customerId, monthYear) {
     expensesSpent,
     totalSpent,
     remainingBalance,
+    varianceAmount,
+    utilizationRate,
     percentageUsed: parseFloat(percentageUsed.toFixed(1)),
     isExceeded,
     isNearLimit,
@@ -624,18 +662,20 @@ app.get('/api/budget/:customerId', (req, res) => {
       SELECT * FROM fact_budget_performance WHERE customer_id = ? ORDER BY month_year DESC
     `).all(customerId);
 
-    if (performanceHistory.length === 0) {
-      performanceHistory = [{
-        budget_fact_id: 1,
+    const activeMonthInHistory = performanceHistory.find(r => r.month_year === monthYear);
+    if (!activeMonthInHistory) {
+      performanceHistory.unshift({
+        budget_fact_id: Date.now(),
         customer_id: customerId,
         date_id: parseInt(monthYear.replace('-', '') + '01', 10),
         month_year: monthYear,
         monthly_budget: summary.monthlyBudget,
         actual_spent: summary.totalSpent,
-        variance_amount: summary.totalSpent - summary.monthlyBudget,
-        utilization_rate: summary.percentageUsed,
+        variance_amount: summary.varianceAmount !== undefined ? summary.varianceAmount : (summary.totalSpent - summary.monthlyBudget),
+        utilization_rate: summary.utilizationRate !== undefined ? summary.utilizationRate : summary.percentageUsed,
         status: summary.status
-      }];
+      });
+      performanceHistory.sort((a, b) => b.month_year.localeCompare(a.month_year));
     }
 
     // Historical spending comparison
@@ -869,25 +909,98 @@ app.post('/api/orders/checkout', (req, res) => {
       storeId,
       items, // array of { productId, quantity, unitPrice }
       paymentMethod = 'UPI',
-      triggerETL = true
+      triggerETL = true,
+      orderId: clientOrderId
     } = req.body;
 
     if (!items || items.length === 0) {
       return res.status(400).json({ error: 'Cart is empty' });
     }
 
-    const orderId = `ORD_${Date.now()}`;
-    const today = new Date().toISOString().substring(0, 10); // YYYY-MM-DD
-    const currentMonthYear = today.substring(0, 7);
-    const totalAmount = items.reduce((acc, item) => acc + (item.quantity * item.unitPrice), 0);
+    if (!customerId) {
+      return res.status(400).json({ error: 'Customer ID is required' });
+    }
+
+    const now = new Date();
+    const nowIso = now.toISOString();
+    const yyyy = now.getFullYear();
+    const mm = String(now.getMonth() + 1).padStart(2, '0');
+    const dd = String(now.getDate()).padStart(2, '0');
+    const today = `${yyyy}-${mm}-${dd}`;
+    const currentMonthYear = `${yyyy}-${mm}`;
+
+    const totalAmount = parseFloat(items.reduce((acc, item) => {
+      const q = Number(item.quantity) || 1;
+      const p = Number(item.unitPrice !== undefined ? item.unitPrice : item.unit_price) || 0;
+      return acc + (q * p);
+    }, 0).toFixed(2));
+
+    // Idempotency: Prevent duplicate order processing if an order with the same orderId already exists
+    const orderId = clientOrderId || `ORD_${Date.now()}`;
+    const existingOrder = db.prepare('SELECT * FROM orders WHERE order_id = ?').get(orderId);
+    if (existingOrder) {
+      const budgetSummary = syncFactBudgetPerformance(customerId, currentMonthYear);
+      return res.json({
+        success: true,
+        duplicatePrevented: true,
+        orderId: existingOrder.order_id,
+        totalAmount: existingOrder.total_amount,
+        itemCount: items.length,
+        monthlyBudget: budgetSummary.monthlyBudget,
+        currentSpent: budgetSummary.totalSpent,
+        remainingBalance: budgetSummary.remainingBalance,
+        varianceAmount: budgetSummary.varianceAmount,
+        utilizationRate: budgetSummary.utilizationRate,
+        percentageUsed: budgetSummary.percentageUsed,
+        monthYear: currentMonthYear,
+        isExceeded: budgetSummary.isExceeded,
+        isNearLimit: budgetSummary.isNearLimit,
+        status: budgetSummary.status
+      });
+    }
+
+    // Also prevent rapid accidental duplicate submission within 3 seconds for the same customer, store, and exact amount
+    const recentDuplicate = db.prepare(`
+      SELECT * FROM orders
+      WHERE customer_id = ?
+        AND store_id = ?
+        AND ABS(total_amount - ?) < 0.01
+        AND (
+          created_at >= datetime('now', '-3 seconds')
+          OR created_at >= ?
+        )
+      ORDER BY created_at DESC
+      LIMIT 1
+    `).get(customerId, storeId, totalAmount, new Date(Date.now() - 3000).toISOString());
+
+    if (recentDuplicate && !clientOrderId) {
+      const budgetSummary = syncFactBudgetPerformance(customerId, currentMonthYear);
+      return res.json({
+        success: true,
+        duplicatePrevented: true,
+        orderId: recentDuplicate.order_id,
+        totalAmount: recentDuplicate.total_amount,
+        itemCount: items.length,
+        monthlyBudget: budgetSummary.monthlyBudget,
+        currentSpent: budgetSummary.totalSpent,
+        remainingBalance: budgetSummary.remainingBalance,
+        varianceAmount: budgetSummary.varianceAmount,
+        utilizationRate: budgetSummary.utilizationRate,
+        percentageUsed: budgetSummary.percentageUsed,
+        monthYear: currentMonthYear,
+        isExceeded: budgetSummary.isExceeded,
+        isNearLimit: budgetSummary.isNearLimit,
+        status: budgetSummary.status
+      });
+    }
 
     db.exec('BEGIN TRANSACTION;');
 
-    // 1. Insert Order
+    // 1. Insert Order with explicit created_at timestamp
     db.prepare(`
-      INSERT INTO orders (order_id, customer_id, store_id, visit_date, total_amount, status, is_etl_synced)
-      VALUES (?, ?, ?, ?, ?, 'COMPLETED', 0)
-    `).run(orderId, customerId, storeId, today, totalAmount);
+      INSERT INTO orders (order_id, customer_id, store_id, visit_date, total_amount, status, created_at, is_etl_synced)
+      VALUES (?, ?, ?, ?, ?, 'COMPLETED', ?, 0)
+    `).run(orderId, customerId, storeId || 'STORE_500', today, totalAmount, nowIso);
 
     // 2. Insert Order Items
     const insertItemStmt = db.prepare(`
@@ -897,8 +1010,11 @@ app.post('/api/orders/checkout', (req, res) => {
 
     for (let i = 0; i < items.length; i++) {
       const itm = items[i];
+      const prodId = itm.productId || itm.product_id;
+      const q = Number(itm.quantity) || 1;
+      const unitP = Number(itm.unitPrice !== undefined ? itm.unitPrice : itm.unit_price) || 0;
       const itemId = `ITEM_${Date.now()}_${i}`;
-      insertItemStmt.run(itemId, orderId, itm.productId, itm.quantity, itm.unitPrice);
+      insertItemStmt.run(itemId, orderId, prodId, q, unitP);
     }
 
     // 3. Insert Payment
@@ -924,8 +1040,8 @@ app.post('/api/orders/checkout', (req, res) => {
       `).run(customerId, defaultBudget, currentMonthYear);
     }
 
-    // 5. Consolidate and sync Fact_Budget_Performance
-    const budgetSummary = syncFactBudgetPerformance(customerId, currentMonthYear);
+    // 5. Consolidate and sync Fact_Budget_Performance immediately
+    let budgetSummary = syncFactBudgetPerformance(customerId, currentMonthYear);
 
     db.exec('COMMIT;');
 
@@ -933,6 +1049,8 @@ app.post('/api/orders/checkout', (req, res) => {
     let etlSummary = null;
     if (triggerETL) {
       etlSummary = runETL({ incremental: true });
+      // Re-sync Fact_Budget_Performance to guarantee consistency after ETL
+      budgetSummary = syncFactBudgetPerformance(customerId, currentMonthYear);
     }
 
     res.json({
@@ -943,10 +1061,13 @@ app.post('/api/orders/checkout', (req, res) => {
       monthlyBudget: budgetSummary.monthlyBudget,
       currentSpent: budgetSummary.totalSpent,
       remainingBalance: budgetSummary.remainingBalance,
+      varianceAmount: budgetSummary.varianceAmount,
+      utilizationRate: budgetSummary.utilizationRate,
       percentageUsed: budgetSummary.percentageUsed,
       monthYear: currentMonthYear,
       isExceeded: budgetSummary.isExceeded,
       isNearLimit: budgetSummary.isNearLimit,
+      status: budgetSummary.status,
       etlSynced: !!etlSummary && etlSummary.success,
       etlSummary
     });
@@ -960,13 +1081,21 @@ app.post('/api/orders/checkout', (req, res) => {
 app.get('/api/orders/:customerId', (req, res) => {
   try {
     const orders = db.prepare(`
-      SELECT o.*, s.store_type, s.city, p.payment_method
+      SELECT o.*, s.store_type, s.city, p.payment_method,
+        (SELECT COUNT(*) FROM order_items oi WHERE oi.order_id = o.order_id) AS items_count,
+        (SELECT GROUP_CONCAT(p2.product_name, ', ') FROM order_items oi2 JOIN products p2 ON oi2.product_id = p2.product_id WHERE oi2.order_id = o.order_id) AS items_summary
       FROM orders o
-      JOIN stores s ON o.store_id = s.store_id
+      LEFT JOIN stores s ON o.store_id = s.store_id
       LEFT JOIN payments p ON o.order_id = p.order_id
       WHERE o.customer_id = ?
-      ORDER BY o.visit_date DESC, o.order_id DESC
-      LIMIT 30
+      ORDER BY 
+        CASE 
+          WHEN o.created_at IS NOT NULL AND o.created_at != '' THEN o.created_at
+          WHEN o.visit_date LIKE '__-__-____' THEN SUBSTR(o.visit_date, 7, 4) || '-' || SUBSTR(o.visit_date, 4, 2) || '-' || SUBSTR(o.visit_date, 1, 2)
+          ELSE o.visit_date
+        END DESC,
+        o.order_id DESC
+      LIMIT 50
     `).all(req.params.customerId);
 
     res.json(orders);
