@@ -293,13 +293,14 @@ export default function App() {
   // Checkout Handler
   const handleCheckoutComplete = async (orderPayload) => {
     const res = await checkoutOrder(orderPayload);
-    const targetCustId = res.order?.customer_id || orderPayload.customerId || activeCustomer?.customer_id;
+    const targetCustId = orderPayload.customerId || activeCustomer?.customer_id;
     const currentMonth = new Date().toISOString().substring(0, 7);
 
     // Instantly update budgetStatus state from checkout response metrics
     if (res && res.currentSpent !== undefined) {
       setBudgetStatus(prev => ({
         ...prev,
+        customerId: targetCustId,
         currentSpent: res.currentSpent,
         ordersSpent: res.currentSpent - (prev?.expensesSpent || 0),
         remainingBalance: res.remainingBalance,
@@ -312,24 +313,45 @@ export default function App() {
       }));
     }
 
-    if (targetCustId) {
-      if (orderPayload.customer) {
-        setCustomers(prev => {
-          if (prev.some(c => c.customer_id === orderPayload.customer.customer_id)) return prev;
-          return [orderPayload.customer, ...prev];
-        });
-        handleSelectCustomer(orderPayload.customer);
-      } else {
-        const found = customers.find(c => c.customer_id === targetCustId);
-        if (found && (!activeCustomer || activeCustomer.customer_id !== targetCustId)) {
-          handleSelectCustomer(found);
+    const custObj = orderPayload.customer || customers.find(c => c.customer_id === targetCustId) || activeCustomer;
+
+    if (custObj) {
+      setActiveCustomer(custObj);
+      localStorage.setItem('smartbasket_customer_id', custObj.customer_id);
+      setCustomers(prev => {
+        const updatedEntry = {
+          ...custObj,
+          current_spent: res.currentSpent,
+          remaining_balance: res.remainingBalance,
+          monthly_budget: res.monthlyBudget,
+          status: res.status,
+          utilization_rate: res.utilizationRate,
+          variance_amount: res.varianceAmount
+        };
+        if (prev.some(c => c.customer_id === custObj.customer_id)) {
+          return prev.map(c => c.customer_id === custObj.customer_id ? updatedEntry : c);
         }
-      }
-      // Re-fetch customer list to update budget statuses in CustomerLoginModal
-      fetchCustomers().then(data => setCustomers(data || [])).catch(() => {});
-      // Immediately reload customer data for currentMonth
-      await loadCustomerData(targetCustId, currentMonth);
+        return [updatedEntry, ...prev];
+      });
     }
+
+    // Asynchronously sync orders, list, and fresh budget details
+    if (targetCustId) {
+      fetchCustomerOrders(targetCustId).then(orders => setOrderHistory(orders || [])).catch(() => {});
+      fetchShoppingList(targetCustId).then(list => setShoppingList(list || { list: null, items: [], totalEstimatedCost: 0 })).catch(() => {});
+      fetchCustomers().then(data => { if (data && data.length > 0) setCustomers(data); }).catch(() => {});
+      fetchBudget(targetCustId, currentMonth).then(freshBudget => {
+        if (freshBudget && !freshBudget.error) {
+          setBudgetStatus(prev => {
+            if (prev && prev.currentSpent !== undefined && freshBudget.currentSpent < prev.currentSpent) {
+              return prev;
+            }
+            return freshBudget;
+          });
+        }
+      }).catch(() => {});
+    }
+
     return res;
   };
 
@@ -434,13 +456,14 @@ export default function App() {
         appMode={appMode}
         onRegisterCustomer={handleCustomerCreated}
         onOpenLoginModal={handleOpenLoginModal}
-        onNavigateToBudget={async () => {
+        onNavigateToBudget={async (cust) => {
           setIsCartOpen(false);
           setActiveTab('budget');
           const currentMonth = new Date().toISOString().substring(0, 7);
-          const targetId = activeCustomer?.customer_id;
-          if (targetId) {
-            await loadCustomerData(targetId, currentMonth);
+          const target = cust || activeCustomer;
+          if (target?.customer_id) {
+            setActiveCustomer(target);
+            await loadCustomerData(target.customer_id, currentMonth);
           }
         }}
       />

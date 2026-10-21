@@ -261,11 +261,12 @@ export default function CartCheckoutModal({
               <div className="flex flex-col sm:flex-row items-center justify-center gap-3 pt-2">
                 <button
                   onClick={() => {
+                    const cust = activeCustomer || (orderSuccess ? { customer_id: orderSuccess.customerId, customer_name: orderSuccess.customerName, city: orderSuccess.city } : null);
                     setOrderSuccess(null);
                     onClose();
-                    if (onNavigateToBudget) onNavigateToBudget();
+                    if (onNavigateToBudget) onNavigateToBudget(cust);
                   }}
-                  className="w-full sm:w-auto px-6 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white font-bold rounded-xl text-xs transition-all shadow-md flex items-center justify-center gap-2"
+                  className="w-full sm:w-auto px-6 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white font-bold rounded-xl text-xs transition-all shadow-md flex items-center justify-center gap-2 cursor-pointer"
                 >
                   <Wallet className="w-4 h-4" />
                   <span>View in Budget Planner</span>
