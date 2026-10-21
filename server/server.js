@@ -423,8 +423,51 @@ app.post('/api/shopping-list/clear', (req, res) => {
   }
 });
 
+// Reusable Helper: Guarantee that customer exists in both OLTP (customers) and OLAP (dim_customer)
+function ensureCustomerExists(customerId, customerDetails = {}) {
+  if (!customerId) return null;
+  try {
+    let cust = db.prepare('SELECT customer_id, customer_name, city, email FROM customers WHERE customer_id = ?').get(customerId);
+    if (!cust) {
+      const name = customerDetails.customer_name || customerDetails.name || `Shopper ${String(customerId).replace(/^CUST_/, '')}`;
+      const city = customerDetails.city || 'Mumbai';
+      const email = customerDetails.email || `${name.toLowerCase().replace(/\s+/g, '.')}@example.com`;
+      const nowIso = new Date().toISOString();
+      
+      db.prepare(`
+        INSERT OR IGNORE INTO customers (customer_id, customer_name, email, city, created_at)
+        VALUES (?, ?, ?, ?, ?)
+      `).run(customerId, name, email, city, nowIso);
+      
+      cust = { customer_id: customerId, customer_name: name, city, email };
+    }
+
+    // Also ensure Conformed Dimension Dim_Customer exists
+    const dimCust = db.prepare('SELECT customer_id FROM dim_customer WHERE customer_id = ?').get(customerId);
+    if (!dimCust) {
+      db.prepare(`
+        INSERT OR IGNORE INTO dim_customer (customer_id, customer_name, city, segment)
+        VALUES (?, ?, ?, 'New Shopper')
+      `).run(customerId, cust.customer_name, cust.city || 'Mumbai');
+    }
+
+    // Also ensure default shopping list exists
+    const listId = `LIST_${customerId}`;
+    db.prepare(`
+      INSERT OR IGNORE INTO shopping_lists (shopping_list_id, customer_id, list_name)
+      VALUES (?, ?, 'My Smart Shopping List')
+    `).run(listId, customerId);
+
+    return cust;
+  } catch (err) {
+    console.warn('ensureCustomerExists notice:', err.message);
+    return null;
+  }
+}
+
 // Reusable Helper: Consolidate Orders & Expenses, and Sync Warehouse Fact_Budget_Performance
 function syncFactBudgetPerformance(customerId, monthYear) {
+  ensureCustomerExists(customerId);
   if (!monthYear || typeof monthYear !== 'string' || !monthYear.includes('-')) {
     const d = new Date();
     const mm = String(d.getMonth() + 1).padStart(2, '0');
@@ -736,6 +779,7 @@ app.post('/api/budget', (req, res) => {
     if (!customerId) {
       return res.status(400).json({ error: 'Customer ID is required' });
     }
+    ensureCustomerExists(customerId);
     const numBudget = parseFloat(monthlyBudget);
     if (isNaN(numBudget) || numBudget < 0) {
       return res.status(400).json({ error: 'Budget amount must be a positive number' });
@@ -761,6 +805,7 @@ app.post('/api/budget', (req, res) => {
 app.get('/api/expenses/:customerId', (req, res) => {
   try {
     const { customerId } = req.params;
+    ensureCustomerExists(customerId);
     const { monthYear } = req.query;
     let query = 'SELECT * FROM expenses WHERE customer_id = ?';
     const params = [customerId];
@@ -784,6 +829,7 @@ app.post('/api/expenses', (req, res) => {
   try {
     const { customerId, title, amount, category = 'Groceries', expenseDate, notes = '' } = req.body;
     if (!customerId) return res.status(400).json({ error: 'Customer ID is required' });
+    ensureCustomerExists(customerId);
     if (!title || !title.trim()) return res.status(400).json({ error: 'Expense title is required' });
     const numAmount = parseFloat(amount);
     if (isNaN(numAmount) || numAmount <= 0) {
@@ -906,6 +952,7 @@ app.post('/api/orders/checkout', (req, res) => {
   try {
     const {
       customerId,
+      customer,
       storeId,
       items, // array of { productId, quantity, unitPrice }
       paymentMethod = 'UPI',
@@ -919,6 +966,22 @@ app.post('/api/orders/checkout', (req, res) => {
 
     if (!customerId) {
       return res.status(400).json({ error: 'Customer ID is required' });
+    }
+
+    // Guarantee that customer exists in OLTP & OLAP dimension
+    ensureCustomerExists(customerId, customer || {});
+
+    // Guarantee store exists
+    let validStoreId = storeId;
+    const storeRow = validStoreId ? db.prepare('SELECT store_id FROM stores WHERE store_id = ?').get(validStoreId) : null;
+    if (!storeRow) {
+      const defaultStore = db.prepare('SELECT store_id FROM stores LIMIT 1').get();
+      validStoreId = defaultStore ? defaultStore.store_id : 'STORE_500';
+      if (!defaultStore) {
+        try {
+          db.prepare(`INSERT OR IGNORE INTO stores (store_id, store_type, city) VALUES ('STORE_500', 'Supermarket', 'Mumbai')`).run();
+        } catch (_) {}
+      }
     }
 
     const now = new Date();
@@ -971,7 +1034,7 @@ app.post('/api/orders/checkout', (req, res) => {
         )
       ORDER BY created_at DESC
       LIMIT 1
-    `).get(customerId, storeId, totalAmount, new Date(Date.now() - 3000).toISOString());
+    `).get(customerId, validStoreId, totalAmount, new Date(Date.now() - 3000).toISOString());
 
     if (recentDuplicate && !clientOrderId) {
       const budgetSummary = syncFactBudgetPerformance(customerId, currentMonthYear);
@@ -1000,7 +1063,7 @@ app.post('/api/orders/checkout', (req, res) => {
     db.prepare(`
       INSERT INTO orders (order_id, customer_id, store_id, visit_date, total_amount, status, created_at, is_etl_synced)
       VALUES (?, ?, ?, ?, ?, 'COMPLETED', ?, 0)
-    `).run(orderId, customerId, storeId || 'STORE_500', today, totalAmount, nowIso);
+    `).run(orderId, customerId, validStoreId, today, totalAmount, nowIso);
 
     // 2. Insert Order Items
     const insertItemStmt = db.prepare(`
@@ -1013,6 +1076,24 @@ app.post('/api/orders/checkout', (req, res) => {
       const prodId = itm.productId || itm.product_id;
       const q = Number(itm.quantity) || 1;
       const unitP = Number(itm.unitPrice !== undefined ? itm.unitPrice : itm.unit_price) || 0;
+      
+      // Ensure product exists in products table to avoid foreign key failure
+      const prodExists = db.prepare('SELECT product_id FROM products WHERE product_id = ?').get(prodId);
+      if (!prodExists) {
+        try {
+          const cat = db.prepare('SELECT category_id FROM categories LIMIT 1').get() || { category_id: 'CAT_101' };
+          db.prepare(`INSERT OR IGNORE INTO categories (category_id, product_category) VALUES (?, 'General')`).run(cat.category_id);
+          db.prepare(`
+            INSERT OR IGNORE INTO products (product_id, product_name, category_id, unit_price, unit)
+            VALUES (?, ?, ?, ?, 'unit')
+          `).run(prodId, itm.product_name || `Product ${prodId}`, cat.category_id, unitP);
+          db.prepare(`
+            INSERT OR IGNORE INTO dim_product (product_id, product_name, category_id, category_name, unit_price)
+            VALUES (?, ?, ?, 'General', ?)
+          `).run(prodId, itm.product_name || `Product ${prodId}`, cat.category_id, unitP);
+        } catch (_) {}
+      }
+
       const itemId = `ITEM_${Date.now()}_${i}`;
       insertItemStmt.run(itemId, orderId, prodId, q, unitP);
     }

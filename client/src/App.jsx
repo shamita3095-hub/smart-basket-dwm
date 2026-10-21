@@ -240,7 +240,10 @@ export default function App() {
     const my = monthYear || budgetStatus?.monthYear || new Date().toISOString().substring(0, 7);
     await updateBudget(activeCustomer.customer_id, newAmount, my);
     const updated = await fetchBudget(activeCustomer.customer_id, my);
-    setBudgetStatus(updated);
+    if (updated && !updated.error) {
+      setBudgetStatus(updated);
+    }
+    fetchCustomers().then(data => setCustomers(data || [])).catch(() => {});
   };
 
   // Expense Handlers
@@ -292,6 +295,23 @@ export default function App() {
     const res = await checkoutOrder(orderPayload);
     const targetCustId = res.order?.customer_id || orderPayload.customerId || activeCustomer?.customer_id;
     const currentMonth = new Date().toISOString().substring(0, 7);
+
+    // Instantly update budgetStatus state from checkout response metrics
+    if (res && res.currentSpent !== undefined) {
+      setBudgetStatus(prev => ({
+        ...prev,
+        currentSpent: res.currentSpent,
+        ordersSpent: res.currentSpent - (prev?.expensesSpent || 0),
+        remainingBalance: res.remainingBalance,
+        percentageUsed: res.percentageUsed,
+        utilizationRate: res.utilizationRate,
+        varianceAmount: res.varianceAmount,
+        monthlyBudget: res.monthlyBudget,
+        status: res.status,
+        monthYear: currentMonth
+      }));
+    }
+
     if (targetCustId) {
       if (orderPayload.customer) {
         setCustomers(prev => {

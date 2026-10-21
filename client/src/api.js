@@ -83,6 +83,10 @@ export async function clearShoppingList(customerId) {
 export async function fetchBudget(customerId, monthYear) {
   const params = monthYear ? `?monthYear=${monthYear}` : '';
   const res = await fetch(`${API_BASE}/budget/${customerId}${params}`);
+  if (!res.ok) {
+    const data = await res.json().catch(() => ({}));
+    throw new Error(data.error || 'Failed to fetch budget');
+  }
   return res.json();
 }
 
@@ -92,6 +96,10 @@ export async function updateBudget(customerId, monthlyBudget, monthYear) {
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ customerId, monthlyBudget, monthYear })
   });
+  if (!res.ok) {
+    const data = await res.json().catch(() => ({}));
+    throw new Error(data.error || 'Failed to update budget');
+  }
   return res.json();
 }
 
@@ -101,6 +109,10 @@ export async function checkoutOrder(orderData) {
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(orderData)
   });
+  if (!res.ok) {
+    const data = await res.json().catch(() => ({}));
+    throw new Error(data.error || 'Checkout failed');
+  }
   return res.json();
 }
 
